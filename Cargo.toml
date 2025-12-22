@@ -1,0 +1,11 @@
+[package]
+name = "dwr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wayland-client = "0.31.11"
+wayland-protocols = { version = "0.32.9", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.3.9", features = ["client"] }
+wgpu = "27.0.1"
+memfd = { path = "memfd" }
