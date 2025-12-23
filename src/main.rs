@@ -1,12 +1,15 @@
 use wayland_client::{self, Connection, Proxy, backend::ObjectId};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 
-use crate::{layer::{Margins, Sizes, Surface}, state::WaylandState};
-mod layer;
+use crate::{
+    surface::{Margins, Sizes, Surface},
+    state::WaylandState,
+};
+mod surface;
 mod state;
 
 fn redraw(surface: &mut Surface) {
-    let properties = surface.get_properties().clone();
+    let properties = *surface.get_properties();
     let data = surface.get_pixel_buffer_mut();
     let mut index = 0;
     for y in 0..properties.sizes.height {
@@ -47,18 +50,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     event_queue.roundtrip(&mut wayland_state)?;
 
+
     let surface_id = wayland_state
-        .create_surface_blocking(500, 100, Layer::Top, &mut event_queue)
+        .create_surface_async(500, 100, Layer::Top, &mut event_queue)
         .unwrap_or(ObjectId::null());
 
-    if let Some(surface) = wayland_state.surface_links.get_mut(&surface_id) {
-        redraw(surface);
-    }
-
-    println!("Entering dispatch loop");
     let mut top = 0;
     let mut w = 0;
     while display.is_alive() {
+        wayland_state.handle_events(&mut event_queue)?;
+
         if let Some(surface) = wayland_state.surface_links.get_mut(&surface_id) {
             surface.set_margin(Margins {
                 top,
@@ -71,24 +72,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 height: 100,
             });
             redraw(surface);
-            // surface.set_anchor(Anchor::Left);
-            // let data = surface.shm.data_mut();
-            // for i in (0..data.len()).step_by(4) {
-            //     // ARGB
-            //     data[i + 0] = 255;
-            //     data[i + 1] = 0;
-            //     data[i + 2] = 0;
-            //     data[i + 3] = 255;
-            // }
         }
-        event_queue.blocking_dispatch(&mut wayland_state)?;
+
         top += 1;
         top %= 1300;
         w += 4;
         w %= 200;
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(16));
     }
-    println!("Exiting dispatch loop");
 
     Ok(())
 }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use wayland_client::{
-    self, Connection, Dispatch, EventQueue,
+    self, Connection, Dispatch, DispatchError, EventQueue,
     backend::ObjectId,
     delegate_noop,
     protocol::{
@@ -17,7 +17,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{
     Layer, ZwlrLayerShellV1,
 };
 
-use crate::layer::{Surface, SurfaceCreator};
+use crate::surface::{Surface, UninitSurface};
 
 #[derive(Debug, Clone, Default)]
 pub struct UnboundProtocols {
@@ -65,20 +65,49 @@ impl BoundProtocols {
 pub struct WaylandState {
     pub unbound: UnboundProtocols,
     pub bound: Option<BoundProtocols>,
-    pub active_creator: Option<SurfaceCreator>,
+    pub surface_creators: HashMap<ObjectId, UninitSurface>,
     pub surface_links: HashMap<ObjectId, Surface>,
 }
 
 impl WaylandState {
-    fn init_creator(&mut self) -> Option<(&mut SurfaceCreator, &BoundProtocols)> {
-        if self.active_creator.is_some() {
-            return None;
+    pub fn handle_events(
+        &mut self,
+        event_queue: &mut EventQueue<Self>,
+    ) -> Result<(), DispatchError> {
+        event_queue.blocking_dispatch(self)?;
+
+        let ready: Vec<UninitSurface> = self
+            .surface_creators
+            .extract_if(|_, uninit| uninit.is_ready())
+            .map(|(_, uninit)| uninit)
+            .collect();
+        for uninit in ready {
+            uninit.finalize(self);
         }
-        self.bound.as_ref()?;
-        self.active_creator = Some(SurfaceCreator::default());
-        self.active_creator.as_mut().zip(self.bound.as_ref())
+
+        Ok(())
     }
 
+    /// Start the creation of a surface (`ZwlrLayerShellV1`)
+    ///
+    /// Due to the nature of Wayland, the creation is not immediate and requires a roundtrip with
+    /// the wayland server. The `ObjectId` returned by this function can be used to check if the
+    /// surface creation has been finalized.
+    pub fn create_surface_async(
+        &mut self,
+        width: u32,
+        height: u32,
+        layer: Layer,
+        event_queue: &mut EventQueue<Self>,
+    ) -> Option<ObjectId> {
+        let queue_handle = event_queue.handle();
+        UninitSurface::setup(width, height, layer, self, &queue_handle)
+    }
+
+    /// Start the creation of a surface (`ZwlrLayerShellV1`) and wait for its completion
+    ///
+    /// # Warning
+    /// This function is VERY prone to deadlocks, only use it for quick debugging purposes
     pub fn create_surface_blocking(
         &mut self,
         width: u32,
@@ -87,25 +116,12 @@ impl WaylandState {
         event_queue: &mut EventQueue<Self>,
     ) -> Option<ObjectId> {
         let queue_handle = event_queue.handle();
+        let id = UninitSurface::setup(width, height, layer, self, &queue_handle)?;
 
-        if let Some((creator, protocols)) = self.init_creator() {
-            creator.create_surface(width, height, layer, protocols, &queue_handle);
+        while !self.surface_links.contains_key(&id) {
+            self.handle_events(event_queue).ok()?;
         }
-
-        while self
-            .active_creator
-            .as_ref()
-            .map(|c| !c.is_ready())
-            .unwrap_or(false)
-        {
-            event_queue.blocking_dispatch(self).ok()?;
-        }
-
-        if let Some(creator) = self.active_creator.take() {
-            creator.finalize(self)
-        } else {
-            None
-        }
+        Some(id)
     }
 }
 

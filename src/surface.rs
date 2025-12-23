@@ -6,12 +6,15 @@ use wayland_client::{
         wl_buffer::WlBuffer, wl_shm::Format, wl_shm_pool::WlShmPool, wl_surface::WlSurface,
     },
 };
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Event as LayerEvent;
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::Layer,
     zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1},
 };
 
-use crate::state::{BoundProtocols, WaylandState};
+use crate::state::WaylandState;
+
+const BUFFER_NAMESPACE: &str = "DWR_BUF";
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Margins {
@@ -117,61 +120,87 @@ impl Surface {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct SurfaceCreator {
+#[derive(Debug)]
+pub struct UninitSurface {
     properties: SurfaceProperties,
-    surfaces: Option<(WlSurface, ZwlrLayerSurfaceV1)>,
+    surface: WlSurface,
+    layer_surface: ZwlrLayerSurfaceV1,
     buffers: Option<(WlShmPool, WlBuffer)>,
     data: Option<Shm>,
 }
 
-impl SurfaceCreator {
+impl UninitSurface {
     pub fn is_ready(&self) -> bool {
-        self.buffers.is_some() && self.surfaces.is_some() && self.data.is_some()
+        self.buffers.is_some() && self.data.is_some()
     }
 
-    pub fn create_surface(
-        &mut self,
+    /// Starts the creation of a Wayland native surface, in specific a `ZwlrLayerSurfaceV1`
+    ///
+    /// Creating a surface in Wayland is async, it requires a roundtrip with the server and
+    /// therefore cannot be done directly.
+    ///
+    /// TODO: explain `UninitSurface` -> `Surface`
+    pub fn setup(
         width: u32,
         height: u32,
         layer: Layer,
-        protocols: &BoundProtocols,
+        state: &mut WaylandState,
         queue_handle: &QueueHandle<WaylandState>,
-    ) {
+    ) -> Option<ObjectId> {
+        let protocols = state.bound.as_ref()?;
+
         let surface = protocols.get_compositor().create_surface(queue_handle, ());
         let layer_surface = protocols.get_layer().get_layer_surface(
             &surface,
             None,
             layer,
-            "testing".to_owned(),
+            BUFFER_NAMESPACE.into(),
             queue_handle,
             (),
         );
-        self.properties.sizes = Sizes { width, height };
+        let layer_id = layer_surface.id().clone();
 
-        layer_surface.set_margin(
-            self.properties.margins.top,
-            self.properties.margins.right,
-            self.properties.margins.bottom,
-            self.properties.margins.left,
+        let mut uninit_surface = UninitSurface {
+            properties: SurfaceProperties::default(),
+            surface,
+            layer_surface,
+            buffers: None,
+            data: None,
+        };
+        uninit_surface.properties.sizes = Sizes { width, height };
+
+        uninit_surface.layer_surface.set_margin(
+            uninit_surface.properties.margins.top,
+            uninit_surface.properties.margins.right,
+            uninit_surface.properties.margins.bottom,
+            uninit_surface.properties.margins.left,
         );
-        layer_surface.set_anchor(self.properties.anchor);
-        layer_surface.set_keyboard_interactivity(self.properties.interactivity);
-        layer_surface.set_size(self.properties.sizes.width, self.properties.sizes.height);
-        surface.commit();
+        uninit_surface
+            .layer_surface
+            .set_anchor(uninit_surface.properties.anchor);
+        uninit_surface
+            .layer_surface
+            .set_keyboard_interactivity(uninit_surface.properties.interactivity);
+        uninit_surface.layer_surface.set_size(
+            uninit_surface.properties.sizes.width,
+            uninit_surface.properties.sizes.height,
+        );
+        uninit_surface.surface.commit();
 
-        self.surfaces = Some((surface, layer_surface));
+        state
+            .surface_creators
+            .insert(layer_id.clone(), uninit_surface);
+        Some(layer_id)
     }
 
     /// Make sure `is_ready()` returns true!
     pub fn finalize(self, state: &mut WaylandState) -> Option<ObjectId> {
         self.data
-            .zip(self.surfaces)
             .zip(self.buffers)
-            .map(|((shm, (surface, layer_surface)), (pool, _))| Surface {
+            .map(|(shm, (pool, _))| Surface {
                 shm,
-                surface,
-                layer_surface,
+                surface: self.surface,
+                layer_surface: self.layer_surface,
                 pool,
                 properties: self.properties,
             })
@@ -193,8 +222,20 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WaylandState {
         qhandle: &QueueHandle<Self>,
     ) {
         match event {
-            wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Event::Configure { serial, width, height } => {
+            LayerEvent::Configure {
+                serial,
+                width,
+                height,
+            } => {
                 proxy.ack_configure(serial);
+
+                // The server may give us 0, 0
+                // This means 'you decide', we default to 100x100
+                // Maybe change this to whatever the surface has?
+                let (width, height) = match (width, height) {
+                    (0, 0) => (100, 100),
+                    id => id,
+                };
 
                 let bytes_per_pixel = 4;
                 let stride = width * bytes_per_pixel;
@@ -202,32 +243,55 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WaylandState {
                 let total_buffer_size = height * stride * num_of_frames;
 
                 if let Some(linked) = state.surface_links.get_mut(&proxy.id())
-                    && let Ok(_) = linked.shm.resize(total_buffer_size as usize) {
-                        linked.properties.sizes.height = height;
-                        linked.properties.sizes.width = width;
+                    && let Ok(_) = linked.shm.resize(total_buffer_size as usize)
+                {
+                    linked.properties.sizes.height = height;
+                    linked.properties.sizes.width = width;
 
-                        let buffer = linked.pool.create_buffer(0, width as i32, height as i32, stride as i32, Format::Argb8888, qhandle, ());
+                    let buffer = linked.pool.create_buffer(
+                        0,
+                        width as i32,
+                        height as i32,
+                        stride as i32,
+                        Format::Argb8888,
+                        qhandle,
+                        (),
+                    );
+                    linked.surface.attach(Some(&buffer), 0, 0);
+                    linked.surface.damage(0, 0, width as i32, height as i32);
+                    linked.surface.commit();
+                }
+
+                if let Some(linked) = state.surface_creators.get_mut(&proxy.id())
+                    && let Some(protocols) = &state.bound
+                {
+                    if let Ok(shm) = Shm::new(total_buffer_size as usize) {
+                        let pool = protocols.get_shm().create_pool(
+                            shm.get_fd(),
+                            total_buffer_size as i32,
+                            qhandle,
+                            (),
+                        );
+                        let buffer = pool.create_buffer(
+                            0,
+                            width as i32,
+                            height as i32,
+                            stride as i32,
+                            Format::Argb8888,
+                            qhandle,
+                            (),
+                        );
+
                         linked.surface.attach(Some(&buffer), 0, 0);
                         linked.surface.damage(0, 0, width as i32, height as i32);
                         linked.surface.commit();
-                    }
 
-                if let (Some(creator), Some(protocols)) = (&mut state.active_creator, &state.bound)
-                    && let Some((surface, _)) = &mut creator.surfaces {
-                    if let Ok(shm) = Shm::new(total_buffer_size as usize) {
-                        let pool = protocols.get_shm().create_pool(shm.get_fd(), total_buffer_size as i32, qhandle, ());
-                        let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, Format::Argb8888, qhandle, ());
-
-                        surface.attach(Some(&buffer), 0, 0);
-                        surface.damage(0, 0, width as i32, height as i32);
-                        surface.commit();
-
-                        creator.buffers = Some((pool, buffer));
-                        creator.data = Some(shm);
+                        linked.buffers = Some((pool, buffer));
+                        linked.data = Some(shm);
                     }
                 }
-            },
-            wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::Event::Closed => todo!(),
+            }
+            LayerEvent::Closed => todo!(),
             _ => todo!(),
         }
     }
