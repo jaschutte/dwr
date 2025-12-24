@@ -1,3 +1,6 @@
+use std::num::NonZero;
+
+use glcore::GLCore;
 use memfd::Shm;
 use wayland_client::{
     self, Connection, Dispatch, Proxy, QueueHandle,
@@ -12,7 +15,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1},
 };
 
-use crate::state::WaylandState;
+use crate::{gl::GpuSurface, state::WaylandState};
 
 const BUFFER_NAMESPACE: &str = "DWR_BUF";
 
@@ -51,16 +54,31 @@ impl Default for SurfaceProperties {
     }
 }
 
-#[derive(Debug)]
 pub struct Surface {
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
     pool: WlShmPool,
+    gpu_surface: GpuSurface,
     shm: Shm,
     properties: SurfaceProperties,
 }
 
 impl Surface {
+    pub fn get_renderer(&mut self) -> &mut GLCore {
+        self.gpu_surface.get_renderer()
+    }
+
+    pub fn render(
+        &mut self,
+        render: fn(&mut glcore::GLCore) -> Result<(), glcore::GLCoreError>,
+    ) -> Result<(), glcore::GLCoreError> {
+        render(self.get_renderer())
+    }
+
+    pub fn swap_buffers(&mut self) -> Result<(), glutin::error::Error> {
+        self.gpu_surface.swap_buffers()
+    }
+
     pub fn set_margin(&mut self, margins: Margins) {
         self.layer_surface
             .set_margin(margins.top, margins.right, margins.bottom, margins.left);
@@ -70,6 +88,11 @@ impl Surface {
 
     pub fn set_size(&mut self, sizes: Sizes) {
         self.layer_surface.set_size(sizes.width, sizes.height);
+        self.surface.commit();
+    }
+
+    pub fn set_layer(&mut self, layer: Layer) {
+        self.layer_surface.set_layer(layer);
         self.surface.commit();
     }
 
@@ -120,11 +143,11 @@ impl Surface {
     }
 }
 
-#[derive(Debug)]
 pub struct UninitSurface {
     properties: SurfaceProperties,
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
+    gpu_surface: Option<GpuSurface>,
     buffers: Option<(WlShmPool, WlBuffer)>,
     data: Option<Shm>,
 }
@@ -164,6 +187,7 @@ impl UninitSurface {
             properties: SurfaceProperties::default(),
             surface,
             layer_surface,
+            gpu_surface: None,
             buffers: None,
             data: None,
         };
@@ -197,10 +221,12 @@ impl UninitSurface {
     pub fn finalize(self, state: &mut WaylandState) -> Option<ObjectId> {
         self.data
             .zip(self.buffers)
-            .map(|(shm, (pool, _))| Surface {
+            .zip(self.gpu_surface)
+            .map(|((shm, (pool, _)), gpu_surface)| Surface {
                 shm,
                 surface: self.surface,
                 layer_surface: self.layer_surface,
+                gpu_surface,
                 pool,
                 properties: self.properties,
             })
@@ -232,19 +258,25 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WaylandState {
                 // The server may give us 0, 0
                 // This means 'you decide', we default to 100x100
                 // Maybe change this to whatever the surface has?
-                let (width, height) = match (width, height) {
-                    (0, 0) => (100, 100),
-                    id => id,
-                };
+                let nn_width: NonZero<u32> = width
+                    .try_into()
+                    .unwrap_or(unsafe { NonZero::new_unchecked(1) });
+                let nn_height: NonZero<u32> = height
+                    .try_into()
+                    .unwrap_or(unsafe { NonZero::new_unchecked(1) });
+                let width = u32::from(nn_width);
+                let height = u32::from(nn_height);
 
                 let bytes_per_pixel = 4;
                 let stride = width * bytes_per_pixel;
-                let num_of_frames = 1;
+                let num_of_frames = 2;
                 let total_buffer_size = height * stride * num_of_frames;
 
                 if let Some(linked) = state.surface_links.get_mut(&proxy.id())
                     && let Ok(_) = linked.shm.resize(total_buffer_size as usize)
                 {
+                    linked.gpu_surface.resize(nn_width, nn_height);
+
                     linked.properties.sizes.height = height;
                     linked.properties.sizes.width = width;
 
@@ -257,6 +289,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WaylandState {
                         qhandle,
                         (),
                     );
+                    linked.gpu_surface.resize(nn_width, nn_height);
                     linked.surface.attach(Some(&buffer), 0, 0);
                     linked.surface.damage(0, 0, width as i32, height as i32);
                     linked.surface.commit();
@@ -264,31 +297,33 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WaylandState {
 
                 if let Some(linked) = state.surface_creators.get_mut(&proxy.id())
                     && let Some(protocols) = &state.bound
+                    && let Ok(shm) = Shm::new(total_buffer_size as usize)
+                    && let Ok(egl_surface) =
+                        GpuSurface::new(&state.gl, &linked.surface, nn_width, nn_height)
                 {
-                    if let Ok(shm) = Shm::new(total_buffer_size as usize) {
-                        let pool = protocols.get_shm().create_pool(
-                            shm.get_fd(),
-                            total_buffer_size as i32,
-                            qhandle,
-                            (),
-                        );
-                        let buffer = pool.create_buffer(
-                            0,
-                            width as i32,
-                            height as i32,
-                            stride as i32,
-                            Format::Argb8888,
-                            qhandle,
-                            (),
-                        );
+                    let pool = protocols.get_shm().create_pool(
+                        shm.get_fd(),
+                        total_buffer_size as i32,
+                        qhandle,
+                        (),
+                    );
+                    let buffer = pool.create_buffer(
+                        0,
+                        width as i32,
+                        height as i32,
+                        stride as i32,
+                        Format::Argb8888,
+                        qhandle,
+                        (),
+                    );
 
-                        linked.surface.attach(Some(&buffer), 0, 0);
-                        linked.surface.damage(0, 0, width as i32, height as i32);
-                        linked.surface.commit();
+                    linked.gpu_surface = Some(egl_surface);
+                    linked.surface.attach(Some(&buffer), 0, 0);
+                    linked.surface.damage(0, 0, width as i32, height as i32);
+                    linked.surface.commit();
 
-                        linked.buffers = Some((pool, buffer));
-                        linked.data = Some(shm);
-                    }
+                    linked.buffers = Some((pool, buffer));
+                    linked.data = Some(shm);
                 }
             }
             LayerEvent::Closed => todo!(),

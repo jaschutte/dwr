@@ -21,14 +21,21 @@
         inherit system overlays;
       };
     in {
-      devShells.default = pkgs.mkShell {
+      devShells.default = pkgs.mkShell rec {
         buildInputs = [
           pkgs.cargo
           pkgs.clippy
           pkgs.rustfmt
           pkgs.rustPackages.clippy
           pkgs.rust-analyzer
+
+          pkgs.wayland
+          pkgs.egl-wayland
+          pkgs.libGL
+          pkgs.pkg-config
         ];
+
+        LD_LIBRARY_PATH = "$LD_LIBRARY_PATH:/run/opengl-driver/lib:/run/opengl-driver-32/lib:${builtins.toString (pkgs.lib.makeLibraryPath buildInputs)}";
         # buildInputs = with pkgs; [
         #   gcc
         #   cargo

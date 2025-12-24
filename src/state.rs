@@ -5,19 +5,14 @@ use wayland_client::{
     backend::ObjectId,
     delegate_noop,
     protocol::{
-        wl_buffer::WlBuffer,
-        wl_compositor::WlCompositor,
-        wl_registry::{self, WlRegistry},
-        wl_shm::WlShm,
-        wl_shm_pool::WlShmPool,
-        wl_surface::WlSurface,
+        wl_buffer::WlBuffer, wl_compositor::WlCompositor, wl_display::WlDisplay, wl_registry::{self, WlRegistry}, wl_shm::WlShm, wl_shm_pool::WlShmPool, wl_surface::WlSurface
     },
 };
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{
     Layer, ZwlrLayerShellV1,
 };
 
-use crate::surface::{Surface, UninitSurface};
+use crate::{gl::GlAbstraction, surface::{Surface, UninitSurface}};
 
 #[derive(Debug, Clone, Default)]
 pub struct UnboundProtocols {
@@ -61,15 +56,25 @@ impl BoundProtocols {
     }
 }
 
-#[derive(Debug, Default)]
 pub struct WaylandState {
     pub unbound: UnboundProtocols,
     pub bound: Option<BoundProtocols>,
     pub surface_creators: HashMap<ObjectId, UninitSurface>,
     pub surface_links: HashMap<ObjectId, Surface>,
+    pub gl: GlAbstraction,
 }
 
 impl WaylandState {
+    pub fn new(display: &WlDisplay) -> WaylandState {
+        WaylandState {
+            unbound: UnboundProtocols::default(),
+            bound: None,
+            surface_creators: HashMap::new(),
+            surface_links: HashMap::new(),
+            gl: GlAbstraction::new(display).expect("Unable to abstract GL"),
+        }
+    }
+
     pub fn handle_events(
         &mut self,
         event_queue: &mut EventQueue<Self>,
