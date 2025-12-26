@@ -143,7 +143,7 @@ impl GpuSurface {
         self.surface.swap_buffers(&self.context)
     }
 
-    pub fn get_renderer(&mut self) -> &mut GLCore {
-        &mut self.renderer
+    pub fn get_renderer(&self) -> GLCore {
+        self.renderer
     }
 }

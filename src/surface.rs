@@ -15,7 +15,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1},
 };
 
-use crate::{gl::GpuSurface, state::WaylandState};
+use crate::{gpu_surface::GpuSurface, state::WaylandState};
 
 const BUFFER_NAMESPACE: &str = "DWR_BUF";
 
@@ -64,13 +64,13 @@ pub struct Surface {
 }
 
 impl Surface {
-    pub fn get_renderer(&mut self) -> &mut GLCore {
+    pub fn get_renderer(&self) -> GLCore {
         self.gpu_surface.get_renderer()
     }
 
     pub fn render(
         &mut self,
-        render: fn(&mut glcore::GLCore) -> Result<(), glcore::GLCoreError>,
+        render: fn(glcore::GLCore) -> Result<(), glcore::GLCoreError>,
     ) -> Result<(), glcore::GLCoreError> {
         render(self.get_renderer())
     }

@@ -14,6 +14,6 @@ memfd = { path = "memfd" }
 
 raw-window-handle = "0.6.2"
 glutin = { version = "0.32.3", features = ["wayland", "egl", "wayland-sys"], default-features = false }
-glcore-rs = "0.3.3"
+glcore-rs = { version = "0.3.3", features = ["diagnose"] }
 
 mlua = { version = "0.11.5", features = ["luajit", "module"] }

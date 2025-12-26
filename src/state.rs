@@ -12,7 +12,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{
     Layer, ZwlrLayerShellV1,
 };
 
-use crate::{gl::GlAbstraction, surface::{Surface, UninitSurface}};
+use crate::{gpu_surface::GlAbstraction, surface::{Surface, UninitSurface}};
 
 #[derive(Debug, Clone, Default)]
 pub struct UnboundProtocols {
