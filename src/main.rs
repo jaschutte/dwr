@@ -6,13 +6,16 @@ use wayland_client::{self, Connection, Proxy};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 
 use crate::{
-    shaders::{Shader, ShaderBundle},
+    opengl::{
+        highlevel::{SimpleGL, SimpleState},
+        shaders::{self, Shader, ShaderBundle},
+        types::{AsFloatArray, OwnedVec3Array, Vec2, Vec3, Vec3Array, VecPromotion},
+    },
     state::WaylandState,
     surface::Margins,
 };
 mod gpu_surface;
 mod opengl;
-mod shaders;
 mod state;
 mod surface;
 
@@ -48,51 +51,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 let _ = surface.render(|graphics| {
-                    let shader_program = ShaderBundle::new_from_files(
-                        graphics,
-                        "src/shaders/flat_color.vert",
-                        "src/shaders/flat_color.frag",
-                    )?
-                    .link()?;
-                    shader_program.use_program()?;
+                    let gl = SimpleGL::<SimpleState>::new(graphics);
+                    let shader_program = gl
+                        .new_shader_program_from_files(
+                            "src/shaders/flat_color.vert",
+                            "src/shaders/flat_color.frag",
+                        )?
+                        .use_program()?;
+                    let gl = gl.shaded(&shader_program);
 
-                    graphics.glClearColor(1.0, 0.0, 0.0, 1.0)?;
-                    graphics.glClear(glcore::GL_COLOR_BUFFER_BIT | glcore::GL_DEPTH_BUFFER_BIT)?;
+                    gl.clear(1.0, 1.0, 0.0, 1.0)?;
 
-                    let vertices: [f32; 9] = [0.5, 0.5, 0.0, 0.5, -0.5, 0.0, -0.5, 0.5, 0.0];
-
-                    // VAO
-                    let mut vertex_attributes = 0;
-                    graphics.glGenVertexArrays(1, &mut vertex_attributes)?;
-                    graphics.glBindVertexArray(vertex_attributes)?;
-
-                    // Copy over data to a buffer
-                    let mut vertex_buffer = 0;
-                    graphics.glGenBuffers(1, &mut vertex_buffer)?;
-                    graphics.glBindBuffer(glcore::GL_ARRAY_BUFFER, vertex_buffer)?;
-                    graphics.glBufferData(
-                        glcore::GL_ARRAY_BUFFER,
-                        std::mem::size_of::<[f32; 9]>(),
-                        vertices.as_ptr() as *mut c_void,
-                        glcore::GL_STATIC_DRAW,
+                    shader_program.set_uniform(
+                        c"color",
+                        shaders::UniformKind::Uniform4f(0.0, 0.0, 1.0, 1.0),
                     )?;
 
-                    // Vertex
-                    graphics.glEnableVertexAttribArray(0)?;
-                    graphics.glVertexAttribPointer(
-                        0,
-                        3,
-                        glcore::GL_FLOAT,
-                        glcore::GL_FALSE as u8,
-                        0,
-                        std::ptr::null(),
-                    )?;
-
-                    let color_index = shader_program.locate_uniform(c"color")?;
-                    graphics.glUniform4f(color_index, 0.0, 0.8, 1.0, 1.0)?;
-
-                    graphics.glDrawArrays(glcore::GL_TRIANGLES, 0, 3)?;
-                    graphics.glDisableVertexAttribArray(0)?;
+                    gl.draw_polygon(OwnedVec3Array::new(vec![
+                        Vec2::new(-0.5, 0.5).promote_zero(),
+                        Vec2::new(0.5, 0.5).promote_zero(),
+                        Vec2::new(0.5, -0.5).promote_zero(),
+                    ]))?;
 
                     Ok(())
                 });
