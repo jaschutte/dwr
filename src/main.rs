@@ -7,9 +7,11 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 
 use crate::{
     opengl::{
-        highlevel::{SimpleGL, SimpleState},
+        highlevel::{ElementsMode, SimpleGL, SimpleState},
         shaders::{self, Shader, ShaderBundle},
-        types::{AsFloatArray, OwnedVec3Array, Vec2, Vec3, Vec3Array, VecPromotion},
+        types::{
+            AsFloatArray, OwnedVec2Array, OwnedVec3Array, Vec2, Vec3, Vec3Array, VecPromotion,
+        },
     },
     state::WaylandState,
     surface::Margins,
@@ -60,18 +62,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .use_program()?;
                     let gl = gl.shaded(&shader_program);
 
-                    gl.clear(1.0, 1.0, 0.0, 1.0)?;
+                    gl.clear(0.2, 0.1, 0.0, 1.0)?;
 
                     shader_program.set_uniform(
                         c"color",
                         shaders::UniformKind::Uniform4f(0.0, 0.0, 1.0, 1.0),
                     )?;
+                    gl.draw_polygon(
+                        ElementsMode::LineLoop,
+                        OwnedVec2Array::new(vec![
+                            Vec2::new(-0.5, 0.5),
+                            Vec2::new(0.5, 0.5),
+                            Vec2::new(0.5, -0.5),
+                        ]),
+                    )?;
 
-                    gl.draw_polygon(OwnedVec3Array::new(vec![
-                        Vec2::new(-0.5, 0.5).promote_zero(),
-                        Vec2::new(0.5, 0.5).promote_zero(),
-                        Vec2::new(0.5, -0.5).promote_zero(),
-                    ]))?;
+                    shader_program.set_uniform(
+                        c"color",
+                        shaders::UniformKind::Uniform4f(0.0, 1.0, 0.5, 1.0),
+                    )?;
+                    gl.draw_polygon(
+                        ElementsMode::LineLoop,
+                        OwnedVec2Array::new(vec![
+                            Vec2::new(-0.5, 0.5),
+                            Vec2::new(-0.5, -0.5),
+                            Vec2::new(0.5, -0.5),
+                        ]),
+                    )?;
+
+                    shader_program.set_uniform(
+                        c"color",
+                        shaders::UniformKind::Uniform4f(1.0, 0.0, 0.5, 1.0),
+                    )?;
+                    gl.draw_rectangle(Vec2::new(-0.2, -0.2), Vec2::new(0.4, 0.4))?;
 
                     Ok(())
                 });

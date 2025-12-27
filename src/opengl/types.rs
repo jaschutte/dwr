@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use glcore::GLCoreError;
 
 pub type GlResult<T> = Result<T, GLCoreError>;
@@ -21,6 +23,38 @@ pub struct Vec2 {
 impl Vec2 {
     pub fn new(x: f32, y: f32) -> Vec2 {
         Vec2 { x, y }
+    }
+}
+
+impl std::ops::Add for Vec2 {
+    type Output = Vec2;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Vec2::new(self.x + rhs.x, self.y + rhs.y)
+    }
+}
+
+impl std::ops::Sub for Vec2 {
+    type Output = Vec2;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Vec2::new(self.x - rhs.x, self.y - rhs.y)
+    }
+}
+
+impl std::ops::Mul for Vec2 {
+    type Output = Vec2;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Vec2::new(self.x * rhs.x, self.y * rhs.y)
+    }
+}
+
+impl std::ops::Div for Vec2 {
+    type Output = Vec2;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Vec2::new(self.x / rhs.x, self.y / rhs.y)
     }
 }
 
@@ -53,6 +87,38 @@ pub struct Vec3 {
 impl Vec3 {
     pub fn new(x: f32, y: f32, z: f32) -> Vec3 {
         Vec3 { x, y, z }
+    }
+}
+
+impl std::ops::Add for Vec3 {
+    type Output = Vec3;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Vec3::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
+    }
+}
+
+impl std::ops::Sub for Vec3 {
+    type Output = Vec3;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Vec3::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z)
+    }
+}
+
+impl std::ops::Mul for Vec3 {
+    type Output = Vec3;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Vec3::new(self.x * rhs.x, self.y * rhs.y, self.z * rhs.z)
+    }
+}
+
+impl std::ops::Div for Vec3 {
+    type Output = Vec3;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Vec3::new(self.x / rhs.x, self.y / rhs.y, self.z / rhs.z)
     }
 }
 
@@ -97,6 +163,38 @@ pub struct Vec4 {
 impl Vec4 {
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Vec4 {
         Vec4 { x, y, z, w }
+    }
+}
+
+impl std::ops::Add for Vec4 {
+    type Output = Vec4;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Vec4::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z, self.w + rhs.w)
+    }
+}
+
+impl std::ops::Sub for Vec4 {
+    type Output = Vec4;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Vec4::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z, self.w - rhs.w)
+    }
+}
+
+impl std::ops::Mul for Vec4 {
+    type Output = Vec4;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        Vec4::new(self.x * rhs.x, self.y * rhs.y, self.z * rhs.z, self.w * rhs.w)
+    }
+}
+
+impl std::ops::Div for Vec4 {
+    type Output = Vec4;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        Vec4::new(self.x / rhs.x, self.y / rhs.y, self.z / rhs.z, self.w / rhs.w)
     }
 }
 
@@ -187,3 +285,43 @@ make_continguous!(Vec4Array, Vec4, 4);
 make_continguous!(Vec2Array, OwnedVec2Array, Vec2, 2);
 make_continguous!(Vec3Array, OwnedVec3Array, Vec3, 3);
 make_continguous!(Vec4Array, OwnedVec4Array, Vec4, 4);
+
+#[repr(transparent)]
+pub struct Indices<'a, B: IndicesBackend>(&'a [B::Backend]);
+
+impl<'a, B: IndicesBackend> Indices<'a, B> {
+    pub fn new(indices: &'a [B::Backend]) -> Indices<'a, B> {
+        Indices(indices)
+    }
+
+    pub fn len(&'a self) -> usize {
+        self.0.len()
+    }
+
+    pub fn ptr(&'a self) -> *const c_void {
+        self.0.as_ptr() as *const c_void
+    }
+}
+
+pub trait IndicesBackend {
+    type Backend;
+    fn get_opengl_type() -> u32;
+}
+impl IndicesBackend for u8 {
+    type Backend = u8;
+    fn get_opengl_type() -> u32 {
+        glcore::GL_UNSIGNED_BYTE
+    }
+}
+impl IndicesBackend for u16 {
+    type Backend = u16;
+    fn get_opengl_type() -> u32 {
+        glcore::GL_UNSIGNED_SHORT
+    }
+}
+impl IndicesBackend for u32 {
+    type Backend = u32;
+    fn get_opengl_type() -> u32 {
+        glcore::GL_UNSIGNED_INT
+    }
+}
