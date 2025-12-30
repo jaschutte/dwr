@@ -1,17 +1,12 @@
-use std::ffi::c_void;
-
-use glcore::{GL_1_0_g, GL_1_1_g, GL_1_5_g, GL_2_0_g, GL_3_0_g};
 use wayland_backend::client::ObjectId;
 use wayland_client::{self, Connection, Proxy};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 
 use crate::{
     opengl::{
-        highlevel::{ElementsMode, SimpleGL, SimpleState},
-        shaders::{self, Shader, ShaderBundle},
-        types::{
-            AsFloatArray, OwnedVec2Array, OwnedVec3Array, Vec2, Vec3, Vec3Array, VecPromotion,
-        },
+        highlevel::{ElementsMode, SimpleGL},
+        shaders::builtin,
+        types::{OwnedVec2Array, Vec2, Vec4},
     },
     state::WaylandState,
     surface::Margins,
@@ -53,21 +48,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 let _ = surface.render(|graphics| {
-                    let gl = SimpleGL::<SimpleState>::new(graphics);
+                    let gl = SimpleGL::new(graphics);
                     let shader_program = gl
-                        .new_shader_program_from_files(
-                            "src/shaders/flat_color.vert",
-                            "src/shaders/flat_color.frag",
-                        )?
+                        // .new_builtin_shader(builtin::FlatColor)?
+                        .new_builtin_shader(builtin::QuadColor)?
                         .use_program()?;
-                    let gl = gl.shaded(&shader_program);
 
+                    let gl = gl.with_shader(shader_program);
                     gl.clear(0.2, 0.1, 0.0, 1.0)?;
 
-                    shader_program.set_uniform(
-                        c"color",
-                        shaders::UniformKind::Uniform4f(0.0, 0.0, 1.0, 1.0),
-                    )?;
+                    shader_program.set_color(Vec4::new(0.0, 0.0, 1.0, 1.0))?;
                     gl.draw_polygon(
                         ElementsMode::LineLoop,
                         OwnedVec2Array::new(vec![
@@ -77,10 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ]),
                     )?;
 
-                    shader_program.set_uniform(
-                        c"color",
-                        shaders::UniformKind::Uniform4f(0.0, 1.0, 0.5, 1.0),
-                    )?;
+                    shader_program.set_color(Vec4::new(0.0, 1.0, 0.5, 1.0))?;
                     gl.draw_polygon(
                         ElementsMode::LineLoop,
                         OwnedVec2Array::new(vec![
@@ -90,11 +77,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ]),
                     )?;
 
-                    shader_program.set_uniform(
-                        c"color",
-                        shaders::UniformKind::Uniform4f(1.0, 0.0, 0.5, 1.0),
-                    )?;
+                    shader_program.set_color(Vec4::new(1.0, 0.0, 0.5, 1.0))?;
                     gl.draw_rectangle(Vec2::new(-0.2, -0.2), Vec2::new(0.4, 0.4))?;
+                    shader_program.set_color(Vec4::new(1.0, 0.0, 0.5, 1.0))?;
+                    gl.draw_rectangle(Vec2::new(-0.8, -0.8), Vec2::new(0.4, 0.4))?;
+
+                    // shader_program.set_color(Vec4::new(1.0, 0.0, 0.5, 1.0))?;
+                    // gl.draw_rectangle_generic(Vec2::new(0.3, 0.3), Vec2::new(0.4, 0.4))?;
+                    // shader_program.set_color(Vec4::new(1.0, 0.0, 0.5, 1.0))?;
+                    // gl.draw_rectangle_generic(Vec2::new(-0.3, 0.3), Vec2::new(0.4, 0.4))?;
 
                     Ok(())
                 });

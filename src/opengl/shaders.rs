@@ -4,7 +4,91 @@ use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::path::Path;
 
+use crate::opengl::types::{Vec2, Vec4};
+
 use super::types::GlResult;
+
+pub mod builtin {
+    use super::ShaderBundle;
+    use crate::opengl::{shaders::UninitShaderProgram, types::GlResult};
+    use glcore::GLCore;
+
+    macro_rules! builtin_shader {
+        ($name:ident <- $file:literal | $($properties:ident):*) => {
+            builtin_shader!($name <- $file);
+
+            $(
+                impl super::$properties for $name {}
+            )*
+        };
+        ($name:ident <- $file:literal) => {
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+            pub struct $name;
+
+            impl BuiltinShader for $name {
+                type Properties = $name;
+
+                fn get_vertex_static(self) -> &'static str {
+                    include_str!(concat!("shaders/", $file, ".vert"))
+                }
+                fn get_fragment_static(self) -> &'static str {
+                    include_str!(concat!("shaders/", $file, ".frag"))
+                }
+                fn get_vertex(self) -> String {
+                    self.get_vertex_static().to_string()
+                }
+                fn get_fragment(self) -> String {
+                    self.get_fragment_static().to_string()
+                }
+                fn into_program(self, core: GLCore) -> GlResult<UninitShaderProgram<Self::Properties>> {
+                    ShaderBundle::new_from_sources(core, self.get_vertex(), self.get_fragment())?.link()
+                }
+            }
+        };
+    }
+
+    pub trait BuiltinShader {
+        type Properties;
+
+        fn get_vertex_static(self) -> &'static str;
+        fn get_fragment_static(self) -> &'static str;
+        fn get_vertex(self) -> String;
+        fn get_fragment(self) -> String;
+        fn into_program(self, core: GLCore) -> GlResult<UninitShaderProgram<Self::Properties>>;
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct NoShader;
+
+    impl BuiltinShader for NoShader {
+        type Properties = NoShader;
+
+        fn get_vertex_static(self) -> &'static str {
+            ""
+        }
+
+        fn get_fragment_static(self) -> &'static str {
+            ""
+        }
+
+        fn get_vertex(self) -> String {
+            String::new()
+        }
+
+        fn get_fragment(self) -> String {
+            String::new()
+        }
+
+        fn into_program(self, _: GLCore) -> GlResult<UninitShaderProgram<Self::Properties>> {
+            Err(glcore::GLCoreError::InvalidOperation(
+                "Cannot create a shader program for the NoShader builtin",
+            ))
+        }
+    }
+
+    builtin_shader!(FlatColor <- "flat_color" | ColorShader:NoMatrixShader);
+    builtin_shader!(QuadColor <- "quad_color" | ColorShader:MatrixShader);
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum ProgramValidation {
@@ -231,7 +315,7 @@ impl ShaderBundle {
         })
     }
 
-    pub fn link(self) -> GlResult<ShaderProgram<IdleState>> {
+    pub fn link<F>(self) -> GlResult<UninitShaderProgram<F>> {
         let shader_program = self.core.glCreateProgram()?;
         self.core
             .glAttachShader(shader_program, self.vertex.shader_id)?;
@@ -247,7 +331,7 @@ impl ShaderBundle {
         self.core.glDeleteShader(self.vertex.shader_id)?;
         self.core.glDeleteShader(self.fragment.shader_id)?;
 
-        Ok(ShaderProgram {
+        Ok(UninitShaderProgram {
             program: shader_program,
             core: self.core,
             _phantom: PhantomData,
@@ -359,23 +443,15 @@ impl<'a> UniformKind<'a> {
     }
 }
 
-pub struct IdleState;
-trait InIdleState {}
-impl InIdleState for IdleState {}
-
-pub struct ActiveState;
-trait InActiveState {}
-impl InActiveState for ActiveState {}
-
 #[derive(Debug, Clone, Copy)]
-pub struct ShaderProgram<ShaderState> {
+pub struct UninitShaderProgram<F> {
     program: u32,
     core: GLCore,
-    _phantom: PhantomData<ShaderState>,
+    _phantom: PhantomData<F>,
 }
 
-impl<State: InIdleState> ShaderProgram<State> {
-    pub fn use_program(self) -> GlResult<ShaderProgram<ActiveState>> {
+impl<F> UninitShaderProgram<F> {
+    pub fn use_program(self) -> GlResult<ShaderProgram<F>> {
         self.core.glUseProgram(self.program)?;
         Ok(ShaderProgram {
             program: self.program,
@@ -385,11 +461,44 @@ impl<State: InIdleState> ShaderProgram<State> {
     }
 }
 
-impl<State: InActiveState> ShaderProgram<State> {
+pub trait ColorShader {}
+pub trait MatrixShader {}
+pub trait NoMatrixShader {}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ShaderProgram<F> {
+    program: u32,
+    core: GLCore,
+    _phantom: PhantomData<F>,
+}
+
+impl<F> ShaderProgram<F> {
     pub fn set_uniform(&self, variable: &CStr, uniform: UniformKind) -> GlResult<()> {
         let location = self
             .core
             .glGetUniformLocation(self.program, variable.as_ptr())?;
         uniform.exec(&self.core, location)
+    }
+}
+
+impl<F: ColorShader> ShaderProgram<F> {
+    pub fn set_color(&self, color: Vec4) -> GlResult<()> {
+        self.set_uniform(
+            c"color",
+            UniformKind::Uniform4f(color.x, color.y, color.z, color.w),
+        )
+    }
+
+    pub fn set_color_rgba(&self, r: f32, g: f32, b: f32, a: f32) -> GlResult<()> {
+        self.set_uniform(c"color", UniformKind::Uniform4f(r, g, b, a))
+    }
+}
+
+impl<F: ColorShader> ShaderProgram<F> {
+    pub fn set_matrix(&self, pos: Vec2, size: Vec2) -> GlResult<()> {
+        self.set_uniform(
+            c"matrix",
+            UniformKind::Uniform4f(pos.x, pos.y, size.x, size.y),
+        )
     }
 }

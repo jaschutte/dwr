@@ -1,27 +1,17 @@
 use std::ffi::c_void;
-use std::marker::PhantomData;
 use std::path::Path;
 
 use glcore::{GL_1_0_g, GL_1_1_g, GL_1_5_g, GL_2_0_g, GL_3_0_g, GLCore, GLCoreError};
 
-use crate::opengl::types::{
-    AsFloatArray, Indices, IndicesBackend, OwnedVec3Array, Vec2, Vec2Array, Vec3, Vec3Array,
-    VecPromotion,
-};
+use crate::opengl::shaders::builtin::{BuiltinShader, NoShader};
+use crate::opengl::shaders::{MatrixShader, NoMatrixShader, UninitShaderProgram};
+use crate::opengl::types::{AsFloatArray, Indices, IndicesBackend, Vec2, Vec2Array};
 
 use super::types::GlResult;
 use super::{
-    shaders,
+    shaders::ColorShader,
     shaders::{ShaderBundle, ShaderProgram},
 };
-
-pub struct SimpleState;
-pub trait InSimpleState {}
-impl InSimpleState for SimpleState {}
-
-pub struct ShadedState;
-pub trait InShadedState {}
-impl InShadedState for ShadedState {}
 
 #[derive(Debug, Clone, Copy)]
 pub enum ElementsMode {
@@ -59,39 +49,39 @@ impl ElementsMode {
 #[derive(Debug, Clone)]
 pub struct SimpleGL<State> {
     core: GLCore,
-    _phantom: PhantomData<State>,
+    current_shader: Option<ShaderProgram<State>>,
 }
 
-impl<S0> SimpleGL<S0> {
-    fn coerce_state<S1>(self) -> SimpleGL<S1> {
-        SimpleGL {
-            core: self.core,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<State> SimpleGL<State> {
-    pub fn new(core: GLCore) -> SimpleGL<SimpleState> {
+impl SimpleGL<NoShader> {
+    pub fn new(core: GLCore) -> SimpleGL<NoShader> {
         SimpleGL {
             core,
-            _phantom: PhantomData,
+            current_shader: None,
         }
     }
+}
 
+impl<S> SimpleGL<S> {
     pub fn new_shader_program(
         &self,
         vertex: String,
         fragment: String,
-    ) -> GlResult<ShaderProgram<shaders::IdleState>> {
+    ) -> GlResult<UninitShaderProgram<S>> {
         ShaderBundle::new_from_sources(self.core, vertex, fragment)?.link()
+    }
+
+    pub fn new_builtin_shader<T: BuiltinShader<Properties = T>>(
+        &self,
+        builtin: T,
+    ) -> GlResult<UninitShaderProgram<T>> {
+        builtin.into_program(self.core)
     }
 
     pub fn new_shader_program_from_files<P0: AsRef<Path>, P1: AsRef<Path>>(
         &self,
         vertex: P0,
         fragment: P1,
-    ) -> GlResult<ShaderProgram<shaders::IdleState>> {
+    ) -> GlResult<UninitShaderProgram<S>> {
         ShaderBundle::new_from_files(self.core, vertex, fragment)?.link()
     }
 
@@ -100,16 +90,54 @@ impl<State> SimpleGL<State> {
         self.core
             .glClear(glcore::GL_COLOR_BUFFER_BIT | glcore::GL_DEPTH_BUFFER_BIT)
     }
-}
 
-impl<S: InSimpleState> SimpleGL<S> {
-    pub fn shaded(self, shader: &ShaderProgram<shaders::ActiveState>) -> SimpleGL<ShadedState> {
-        let _ = shader;
-        self.coerce_state()
+    pub fn with_shader<N>(self, shader: ShaderProgram<N>) -> SimpleGL<N> {
+        SimpleGL {
+            core: self.core,
+            current_shader: Some(shader),
+        }
     }
 }
 
-impl<S: InShadedState> SimpleGL<S> {
+impl<S: ColorShader + MatrixShader> SimpleGL<S> {
+    pub fn draw_rectangle(&self, pos: Vec2, size: Vec2) -> GlResult<()> {
+        self.current_shader
+            .as_ref()
+            .ok_or(GLCoreError::InvalidOperation("No shader loaded"))?
+            .set_matrix(pos, size)?;
+
+        let vertices_backend = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(0.0, 1.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+        ];
+        let indices_backend = [0, 1, 2, 3];
+        let indices = Indices::<u32>::new(&indices_backend);
+        let vertices = Vec2Array::new(&vertices_backend);
+
+        self.draw_polygon_indices(ElementsMode::TriangleStrip, vertices, indices)
+    }
+}
+
+impl<S: ColorShader + NoMatrixShader> SimpleGL<S> {
+    pub fn draw_rectangle_generic(&self, topleft: Vec2, size: Vec2) -> GlResult<()> {
+        let vertices = [
+            topleft,
+            topleft + size * Vec2::new(1.0, 0.0),
+            topleft + size * Vec2::new(0.0, 1.0),
+            topleft + size,
+        ];
+        let indices = [0, 1, 2, 3];
+        self.draw_polygon_indices(
+            ElementsMode::TriangleStrip,
+            Vec2Array::new(&vertices),
+            Indices::<u32>::new(&indices),
+        )
+    }
+}
+
+impl<S: ColorShader> SimpleGL<S> {
     pub fn draw_polygon<V>(&self, mode: ElementsMode, vertices: V) -> GlResult<()>
     where
         V: AsFloatArray<Backend = Vec2>,
@@ -154,6 +182,7 @@ impl<S: InShadedState> SimpleGL<S> {
             (vert_ref.len() / V::FLOATS_PER_ELEMENT) as i32,
         )?;
         self.core.glDisableVertexAttribArray(0)?;
+        self.core.glDeleteBuffers(1, [vertex_buffer].as_ptr())?;
         Ok(())
     }
 
@@ -220,21 +249,8 @@ impl<S: InShadedState> SimpleGL<S> {
             std::ptr::null(),
         )?;
         self.core.glDisableVertexAttribArray(0)?;
+        self.core
+            .glDeleteBuffers(2, [vertex_buffer, index_buffer].as_ptr())?;
         Ok(())
-    }
-
-    pub fn draw_rectangle(&self, topleft: Vec2, size: Vec2) -> GlResult<()> {
-        let vertices = [
-            topleft,
-            topleft + size * Vec2::new(1.0, 0.0),
-            topleft + size * Vec2::new(0.0, 1.0),
-            topleft + size,
-        ];
-        let indices = [0, 1, 2, 3];
-        self.draw_polygon_indices(
-            ElementsMode::TriangleStrip,
-            Vec2Array::new(&vertices),
-            Indices::<u32>::new(&indices),
-        )
     }
 }

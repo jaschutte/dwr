@@ -16,13 +16,17 @@ pub trait VecDemotion<D> {
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 pub struct Vec2 {
-    x: f32,
-    y: f32,
+    pub x: f32,
+    pub y: f32,
 }
 
 impl Vec2 {
     pub fn new(x: f32, y: f32) -> Vec2 {
         Vec2 { x, y }
+    }
+
+    pub fn zero() -> Vec2 {
+        Vec2::new(0.0, 0.0)
     }
 }
 
@@ -79,14 +83,18 @@ impl VecPromotion<Vec3> for Vec2 {
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 pub struct Vec3 {
-    x: f32,
-    y: f32,
-    z: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 impl Vec3 {
     pub fn new(x: f32, y: f32, z: f32) -> Vec3 {
         Vec3 { x, y, z }
+    }
+
+    pub fn zero() -> Vec3 {
+        Vec3::new(0.0, 0.0, 0.0)
     }
 }
 
@@ -154,15 +162,19 @@ impl VecDemotion<Vec2> for Vec3 {
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
 pub struct Vec4 {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
 }
 
 impl Vec4 {
     pub fn new(x: f32, y: f32, z: f32, w: f32) -> Vec4 {
         Vec4 { x, y, z, w }
+    }
+
+    pub fn zero() -> Vec4 {
+        Vec4::new(0.0, 0.0, 0.0, 0.0)
     }
 }
 

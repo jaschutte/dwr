@@ -17,3 +17,4 @@ glutin = { version = "0.32.3", features = ["wayland", "egl", "wayland-sys"], def
 glcore-rs = { version = "0.3.3", features = ["diagnose"] }
 
 mlua = { version = "0.11.5", features = ["luajit", "module"] }
+fontdue = "0.9.3"
