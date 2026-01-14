@@ -2,6 +2,7 @@ use std::num::NonZero;
 
 use glcore::GLCore;
 use memfd::Shm;
+use mlua::FromLua;
 use wayland_client::{
     self, Connection, Dispatch, Proxy, QueueHandle,
     backend::ObjectId,
@@ -54,6 +55,7 @@ impl Default for SurfaceProperties {
     }
 }
 
+#[derive(Debug)]
 pub struct Surface {
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
@@ -143,6 +145,7 @@ impl Surface {
     }
 }
 
+#[derive(Debug)]
 pub struct UninitSurface {
     properties: SurfaceProperties,
     surface: WlSurface,

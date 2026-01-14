@@ -15,6 +15,7 @@ mod gpu_surface;
 mod opengl;
 mod state;
 mod surface;
+mod lua;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connection = Connection::connect_to_env()?;

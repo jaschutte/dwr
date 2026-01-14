@@ -3,6 +3,10 @@ name = "dwr"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+path = "src/main.rs"
+crate-type = [ "cdylib" ]
+
 [dependencies]
 wayland-backend = { version = "0.3.11", features = ["client_system", "raw-window-handle", "rwh_06"] }
 wayland-client = "0.31.11"

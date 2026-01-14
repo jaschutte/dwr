@@ -5,14 +5,23 @@ use wayland_client::{
     backend::ObjectId,
     delegate_noop,
     protocol::{
-        wl_buffer::WlBuffer, wl_compositor::WlCompositor, wl_display::WlDisplay, wl_registry::{self, WlRegistry}, wl_shm::WlShm, wl_shm_pool::WlShmPool, wl_surface::WlSurface
+        wl_buffer::WlBuffer,
+        wl_compositor::WlCompositor,
+        wl_display::WlDisplay,
+        wl_registry::{self, WlRegistry},
+        wl_shm::WlShm,
+        wl_shm_pool::WlShmPool,
+        wl_surface::WlSurface,
     },
 };
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{
     Layer, ZwlrLayerShellV1,
 };
 
-use crate::{gpu_surface::GlAbstraction, surface::{Surface, UninitSurface}};
+use crate::{
+    gpu_surface::GlAbstraction,
+    surface::{Surface, UninitSurface},
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct UnboundProtocols {
@@ -61,6 +70,7 @@ pub struct WaylandState {
     pub bound: Option<BoundProtocols>,
     pub surface_creators: HashMap<ObjectId, UninitSurface>,
     pub surface_links: HashMap<ObjectId, Surface>,
+    pub surface_creation_callback: HashMap<ObjectId, Box<dyn FnOnce(&mut Self, ObjectId)>>,
     pub gl: GlAbstraction,
 }
 
@@ -71,26 +81,49 @@ impl WaylandState {
             bound: None,
             surface_creators: HashMap::new(),
             surface_links: HashMap::new(),
+            surface_creation_callback: HashMap::new(),
             gl: GlAbstraction::new(display).expect("Unable to abstract GL"),
         }
+    }
+
+    pub fn post_dispatch(
+        &mut self,
+        event_queue: &mut EventQueue<Self>,
+    ) -> Result<(), DispatchError> {
+        event_queue.blocking_dispatch(self)?;
+
+        let ready: Vec<(ObjectId, UninitSurface)> = self
+            .surface_creators
+            .extract_if(|_, uninit| uninit.is_ready())
+            .collect();
+        for (key, uninit) in ready {
+            uninit.finalize(self);
+
+            println!("finalized {key:?}");
+            if let Some(callback) = self.surface_creation_callback.remove(&key) {
+                callback(self, key)
+            }
+        }
+
+        Ok(())
     }
 
     pub fn handle_events(
         &mut self,
         event_queue: &mut EventQueue<Self>,
     ) -> Result<(), DispatchError> {
+        event_queue.dispatch_pending(self)?;
+
+        self.post_dispatch(event_queue)
+    }
+
+    pub fn handle_events_blocking(
+        &mut self,
+        event_queue: &mut EventQueue<Self>,
+    ) -> Result<(), DispatchError> {
         event_queue.blocking_dispatch(self)?;
 
-        let ready: Vec<UninitSurface> = self
-            .surface_creators
-            .extract_if(|_, uninit| uninit.is_ready())
-            .map(|(_, uninit)| uninit)
-            .collect();
-        for uninit in ready {
-            uninit.finalize(self);
-        }
-
-        Ok(())
+        self.post_dispatch(event_queue)
     }
 
     /// Start the creation of a surface (`ZwlrLayerShellV1`)

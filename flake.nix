@@ -36,11 +36,6 @@
         ];
 
         LD_LIBRARY_PATH = "$LD_LIBRARY_PATH:/run/opengl-driver/lib:/run/opengl-driver-32/lib:${builtins.toString (pkgs.lib.makeLibraryPath buildInputs)}";
-        # buildInputs = with pkgs; [
-        #   gcc
-        #   cargo
-        #   rustc
-        # ];
       };
     }
   );
