@@ -1,6 +1,6 @@
 use std::num::NonZero;
 
-use glcore::GLCore;
+use glcore::{GL_1_0_g, GLCore, GLCoreError};
 use memfd::Shm;
 use mlua::FromLua;
 use wayland_client::{
@@ -55,14 +55,51 @@ impl Default for SurfaceProperties {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum SurfaceStatus {
+    /// The surface is in the process of creation, no operations may be performed
+    Uninit,
+    /// The surface itself may be modified, moved around and resizing operations are safe to do
+    Modifiable,
+    /// The surface is rendering, no resizing operations may be performed
+    Rendering,
+    /// The surface is being resized, no rendering operations may be performed
+    Resizing,
+}
+
+impl SurfaceStatus {
+    fn may_resize(self) -> bool {
+        matches!(self, SurfaceStatus::Modifiable)
+    }
+
+    fn may_render(self) -> bool {
+        matches!(self, SurfaceStatus::Modifiable)
+    }
+
+    fn may_modify(self) -> bool {
+        matches!(self, SurfaceStatus::Modifiable)
+    }
+}
+
+/// Generic 'surface', aka a renderable rectangle
+///
+/// This struct abstracts away the lower level interfaces and provides a safe API to interact with
 #[derive(Debug)]
 pub struct Surface {
     surface: WlSurface,
     layer_surface: ZwlrLayerSurfaceV1,
-    pool: WlShmPool,
-    gpu_surface: GpuSurface,
-    shm: Shm,
+    // pool: WlShmPool,
+    pub gpu_surface: GpuSurface,
+    // shm: Shm,
     properties: SurfaceProperties,
+    status: SurfaceStatus,
+}
+
+#[derive(Debug)]
+pub enum SurfaceError {
+    OpenGL(glcore::GLCoreError),
+    Glutin(glutin::error::Error),
+    InvalidState,
 }
 
 impl Surface {
@@ -73,22 +110,39 @@ impl Surface {
     pub fn render(
         &mut self,
         render: fn(glcore::GLCore) -> Result<(), glcore::GLCoreError>,
-    ) -> Result<(), glcore::GLCoreError> {
-        render(self.get_renderer())
+    ) -> Result<(), SurfaceError> {
+        if self.status.may_render() {
+            render(self.get_renderer()).map_err(SurfaceError::OpenGL)
+        } else {
+            Err(SurfaceError::InvalidState)
+        }
     }
 
-    pub fn swap_buffers(&mut self) -> Result<(), glutin::error::Error> {
-        self.gpu_surface.swap_buffers()
+    pub fn swap_buffers(&mut self) -> Result<(), SurfaceError> {
+        if self.status.may_render() {
+            self.gpu_surface
+                .swap_buffers()
+                .map_err(SurfaceError::Glutin)
+        } else {
+            Err(SurfaceError::InvalidState)
+        }
     }
 
-    pub fn set_margin(&mut self, margins: Margins) {
-        self.layer_surface
-            .set_margin(margins.top, margins.right, margins.bottom, margins.left);
-        self.properties.margins = margins;
-        self.surface.commit();
+    pub fn set_margin(&mut self, margins: Margins) -> Result<(), SurfaceError> {
+        if self.status.may_modify() {
+            self.layer_surface
+                .set_margin(margins.top, margins.right, margins.bottom, margins.left);
+            self.properties.margins = margins;
+            self.surface.commit();
+            Ok(())
+        } else {
+            Err(SurfaceError::InvalidState)
+        }
     }
 
     pub fn set_size(&mut self, sizes: Sizes) {
+        println!("Setting size!");
+        self.status = SurfaceStatus::Resizing;
         self.layer_surface.set_size(sizes.width, sizes.height);
         self.surface.commit();
     }
@@ -111,13 +165,13 @@ impl Surface {
         self.surface.commit();
     }
 
-    pub fn get_pixel_buffer(&self) -> &[u8] {
-        self.shm.data()
-    }
-
-    pub fn get_pixel_buffer_mut(&mut self) -> &mut [u8] {
-        self.shm.data_mut()
-    }
+    // pub fn get_pixel_buffer(&self) -> &[u8] {
+    //     self.shm.data()
+    // }
+    //
+    // pub fn get_pixel_buffer_mut(&mut self) -> &mut [u8] {
+    //     self.shm.data_mut()
+    // }
 
     pub fn set_properties(&mut self, mut props: SurfaceProperties) {
         let new_sizes = props.sizes;
@@ -153,11 +207,13 @@ pub struct UninitSurface {
     gpu_surface: Option<GpuSurface>,
     buffers: Option<(WlShmPool, WlBuffer)>,
     data: Option<Shm>,
+    ready_flag: bool,
 }
 
 impl UninitSurface {
     pub fn is_ready(&self) -> bool {
-        self.buffers.is_some() && self.data.is_some()
+        // self.buffers.is_some() && self.data.is_some()
+        self.ready_flag
     }
 
     /// Starts the creation of a Wayland native surface, in specific a `ZwlrLayerSurfaceV1`
@@ -193,6 +249,7 @@ impl UninitSurface {
             gpu_surface: None,
             buffers: None,
             data: None,
+            ready_flag: false,
         };
         uninit_surface.properties.sizes = Sizes { width, height };
 
@@ -222,16 +279,17 @@ impl UninitSurface {
 
     /// Make sure `is_ready()` returns true!
     pub fn finalize(self, state: &mut WaylandState) -> Option<ObjectId> {
-        self.data
-            .zip(self.buffers)
-            .zip(self.gpu_surface)
-            .map(|((shm, (pool, _)), gpu_surface)| Surface {
-                shm,
+        self.gpu_surface
+            // .zip(self.buffers)
+            // .zip(self.gpu_surface)
+            .map(|gpu_surface| Surface {
+                // shm,
                 surface: self.surface,
                 layer_surface: self.layer_surface,
                 gpu_surface,
-                pool,
+                // pool,
                 properties: self.properties,
+                status: SurfaceStatus::Modifiable,
             })
             .map(|surface| {
                 let id = surface.layer_surface.id();
@@ -276,57 +334,59 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for WaylandState {
                 let total_buffer_size = height * stride * num_of_frames;
 
                 if let Some(linked) = state.surface_links.get_mut(&proxy.id())
-                    && let Ok(_) = linked.shm.resize(total_buffer_size as usize)
+                    // && let Ok(_) = linked.shm.resize(total_buffer_size as usize)
                 {
-                    linked.gpu_surface.resize(nn_width, nn_height);
-
                     linked.properties.sizes.height = height;
                     linked.properties.sizes.width = width;
 
-                    let buffer = linked.pool.create_buffer(
-                        0,
-                        width as i32,
-                        height as i32,
-                        stride as i32,
-                        Format::Argb8888,
-                        qhandle,
-                        (),
-                    );
+                    // let buffer = linked.pool.create_buffer(
+                    //     0,
+                    //     width as i32,
+                    //     height as i32,
+                    //     stride as i32,
+                    //     Format::Argb8888,
+                    //     qhandle,
+                    //     (),
+                    // );
                     linked.gpu_surface.resize(nn_width, nn_height);
-                    linked.surface.attach(Some(&buffer), 0, 0);
-                    linked.surface.damage(0, 0, width as i32, height as i32);
+                    println!("Size ACK'd");
+                    // linked.surface.attach(Some(&buffer), 0, 0);
+                    // linked.surface.damage(0, 0, width as i32, height as i32);
                     linked.surface.commit();
+
+                    linked.status = SurfaceStatus::Modifiable;
                 }
 
                 if let Some(linked) = state.surface_creators.get_mut(&proxy.id())
-                    && let Some(protocols) = &state.bound
-                    && let Ok(shm) = Shm::new(total_buffer_size as usize)
+                    // && let Some(protocols) = &state.bound
+                    // && let Ok(shm) = Shm::new(total_buffer_size as usize)
                     && let Ok(egl_surface) =
                         GpuSurface::new(&state.gl, &linked.surface, nn_width, nn_height)
                 {
-                    let pool = protocols.get_shm().create_pool(
-                        shm.get_fd(),
-                        total_buffer_size as i32,
-                        qhandle,
-                        (),
-                    );
-                    let buffer = pool.create_buffer(
-                        0,
-                        width as i32,
-                        height as i32,
-                        stride as i32,
-                        Format::Argb8888,
-                        qhandle,
-                        (),
-                    );
+                    // let pool = protocols.get_shm().create_pool(
+                    //     shm.get_fd(),
+                    //     total_buffer_size as i32,
+                    //     qhandle,
+                    //     (),
+                    // );
+                    // let buffer = pool.create_buffer(
+                    //     0,
+                    //     width as i32,
+                    //     height as i32,
+                    //     stride as i32,
+                    //     Format::Argb8888,
+                    //     qhandle,
+                    //     (),
+                    // );
 
                     linked.gpu_surface = Some(egl_surface);
-                    linked.surface.attach(Some(&buffer), 0, 0);
-                    linked.surface.damage(0, 0, width as i32, height as i32);
+                    // linked.surface.attach(Some(&buffer), 0, 0);
+                    // linked.surface.damage(0, 0, width as i32, height as i32);
                     linked.surface.commit();
+                    linked.ready_flag = true;
 
-                    linked.buffers = Some((pool, buffer));
-                    linked.data = Some(shm);
+                    // linked.buffers = Some((pool, buffer));
+                    // linked.data = Some(shm);
                 }
             }
             LayerEvent::Closed => todo!(),

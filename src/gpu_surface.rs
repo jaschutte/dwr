@@ -1,4 +1,4 @@
-use glcore::GLCore;
+use glcore::{GL_1_0_g, GLCore};
 use glutin::config::{Api, GlConfig};
 use glutin::context::{
     AsRawContext, ContextAttributesBuilder, NotCurrentContext, PossiblyCurrentContext,
@@ -107,8 +107,8 @@ impl GlAbstraction {
 
 #[derive(Debug)]
 pub struct GpuSurface {
-    context: PossiblyCurrentContext,
-    surface: Surface<WindowSurface>,
+    pub context: PossiblyCurrentContext,
+    pub surface: Surface<WindowSurface>,
     renderer: GLCore,
 }
 
@@ -138,6 +138,9 @@ impl GpuSurface {
 
     pub fn resize(&mut self, width: NonZero<u32>, height: NonZero<u32>) {
         self.surface.resize(&self.context, width, height);
+        let w: u32 = width.into();
+        let h: u32 = height.into();
+        self.renderer.glViewport(0, 0, w as i32, h as i32);
     }
 
     pub fn swap_buffers(&mut self) -> Result<(), GlutError> {

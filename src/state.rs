@@ -90,8 +90,6 @@ impl WaylandState {
         &mut self,
         event_queue: &mut EventQueue<Self>,
     ) -> Result<(), DispatchError> {
-        event_queue.blocking_dispatch(self)?;
-
         let ready: Vec<(ObjectId, UninitSurface)> = self
             .surface_creators
             .extract_if(|_, uninit| uninit.is_ready())
@@ -112,7 +110,7 @@ impl WaylandState {
         &mut self,
         event_queue: &mut EventQueue<Self>,
     ) -> Result<(), DispatchError> {
-        event_queue.dispatch_pending(self)?;
+        event_queue.roundtrip(self)?;
 
         self.post_dispatch(event_queue)
     }

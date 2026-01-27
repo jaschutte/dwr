@@ -14,7 +14,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 use super::rendering::LuaSurfaceReference;
 use crate::{opengl::types::GlResult, state::WaylandState};
 
-struct WaylandClient {
+pub struct WaylandClient {
     connection: Connection,
     display: WlDisplay,
     event_queue: EventQueue<WaylandState>,
@@ -48,7 +48,7 @@ impl WaylandClient {
         Ok(client.display.is_alive())
     }
 
-    fn render_test(state: &mut WaylandState, surface_id: &ObjectId) {
+    pub fn render_test(state: &mut WaylandState, surface_id: &ObjectId) {
         let surface = state.surface_links.get_mut(surface_id).unwrap();
         let _ = surface.render(|graphics| {
             let gl = crate::opengl::highlevel::SimpleGL::new(graphics);

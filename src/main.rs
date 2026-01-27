@@ -1,3 +1,6 @@
+use std::num::NonZero;
+
+use glutin::surface::GlSurface;
 use wayland_backend::client::ObjectId;
 use wayland_client::{self, Connection, Proxy};
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
@@ -34,19 +37,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(ObjectId::null());
 
     let mut has_surface = false;
+    let mut has_resized = false;
     while display.is_alive() {
         wayland_state.handle_events(&mut event_queue)?;
 
         if let Some(surface) = wayland_state.surface_links.get_mut(&surface_id) {
-            if !has_surface {
                 has_surface = true;
 
-                surface.set_margin(Margins {
-                    top: 100,
-                    right: 0,
-                    bottom: 0,
-                    left: 0,
-                });
+                // surface.set_margin(Margins {
+                //     top: 100,
+                //     right: 0,
+                //     bottom: 0,
+                //     left: 0,
+                // });
 
                 let _ = surface.render(|graphics| {
                     let gl = SimpleGL::new(graphics);
@@ -90,10 +93,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     Ok(())
                 });
-                surface.swap_buffers()?;
+                surface.swap_buffers();
+            if !has_resized {
+                has_resized = true;
+                surface.set_size(surface::Sizes { width: 100, height: 100 });
             }
-
-            println!("frame with surface");
         }
         std::thread::sleep(std::time::Duration::from_millis(16));
     }
