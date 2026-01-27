@@ -107,8 +107,8 @@ impl GlAbstraction {
 
 #[derive(Debug)]
 pub struct GpuSurface {
-    context: PossiblyCurrentContext,
-    surface: Surface<WindowSurface>,
+    pub context: PossiblyCurrentContext,
+    pub surface: Surface<WindowSurface>,
     renderer: GLCore,
 }
 

@@ -14,17 +14,29 @@ end
 local fps = 60
 local speed = 100
 
+local resized = false
+
 local top = 0
 while client:is_alive() do
     for i = 1, amount do
         local surface = surfaces[i]
         if surface then
-            -- surface:set_margin({ top = top + i * 60, bottom = 0, left = 0, right = 0 })
-            surface:set_margin({ top = top + i * 60, bottom = 0, right = 0 })
+            surface:set_margin({ top = top + i * 60, bottom = 0, left = 0, right = 0 })
         end
     end
     top = top + speed / fps
     top = top % 800
+
+
+    for i = 1, amount do
+        local surface = surfaces[i]
+        if surface and not resized then
+            if top >= 300 then
+                surfaces[1]:set_size({ height = 10, width = 100 })
+                resized = true
+            end
+        end
+    end
 
     client:render()
 end
