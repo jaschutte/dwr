@@ -106,19 +106,19 @@ impl GlAbstraction {
 }
 
 #[derive(Debug)]
-pub struct GpuSurface {
-    pub context: PossiblyCurrentContext,
-    pub surface: Surface<WindowSurface>,
+pub struct GpuInterface {
+    context: PossiblyCurrentContext,
+    surface: Surface<WindowSurface>,
     renderer: GLCore,
 }
 
-impl GpuSurface {
+impl GpuInterface {
     pub fn new(
         abstraction: &GlAbstraction,
         surface: &WlSurface,
         width: NonZero<u32>,
         height: NonZero<u32>,
-    ) -> Result<GpuSurface, GlutError> {
+    ) -> Result<GpuInterface, GlutError> {
         let not_context = abstraction.create_context(surface)?;
         let surface = abstraction.create_surface(surface, width, height)?;
         let context = not_context.make_current(&surface)?;
@@ -129,7 +129,7 @@ impl GpuSurface {
         })
         .map_err(|_| GlutError::from(GlutErrorKind::BadContext))?;
 
-        Ok(GpuSurface {
+        Ok(GpuInterface {
             context,
             surface,
             renderer,
