@@ -11,8 +11,8 @@ use wayland_client::{
 };
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 
-use super::rendering::LuaSurfaceReference;
-use crate::{opengl::types::GlResult, state::WaylandState};
+use super::rendering::LuaSurface;
+use crate::{opengl::types::GlResult, state::WaylandState, surface::{Margins, Surface, SurfaceProperties}};
 
 pub struct WaylandClient {
     connection: Connection,
@@ -48,8 +48,7 @@ impl WaylandClient {
         Ok(client.display.is_alive())
     }
 
-    pub fn render_test(state: &mut WaylandState, surface_id: &ObjectId) {
-        let surface = state.surface_links.get_mut(surface_id).unwrap();
+    pub fn render_test(surface: &mut Surface) {
         let _ = surface.render(|graphics| {
             let gl = crate::opengl::highlevel::SimpleGL::new(graphics);
             let shader_program = gl
@@ -93,50 +92,50 @@ impl WaylandClient {
 
             Ok(())
         });
-        let _ = surface.swap_buffers();
+    }
+
+    fn is_busy(_: &Lua, client: &Self, _: ()) -> LResult<bool> {
+        Ok(client.state.try_borrow().is_err())
     }
 
     fn create_surface(
         _: &Lua,
         client: &mut Self,
-        (w, h, callback): (u32, u32, Function),
-    ) -> LResult<()> {
-        let surface_id = client
-            .state
-            .borrow_mut()
-            .create_surface_async(w, h, Layer::Top, &mut client.event_queue)
-            .unwrap_or(ObjectId::null());
+        _: (),
+    ) -> LResult<Option<LuaSurface>> {
+        let state = match client.state.try_borrow().ok() {
+            Some(state) => state,
+            None => return Ok(None),
+        };
+        let properties = SurfaceProperties::default();
+        let surface = match Surface::create(properties, &state, &client.queue_handle) {
+            Some(state) => state,
+            None => return Ok(None),
+        };
 
-        let rc_state = client.state.clone();
-        client.state.borrow_mut().surface_creation_callback.insert(
-            surface_id,
-            Box::new(move |state, surface_id| {
-                WaylandClient::render_test(state, &surface_id);
-
-                let reference = LuaSurfaceReference::new(surface_id, rc_state);
-                let _ = callback.call::<()>(reference);
-            }),
-        );
-
-        Ok(())
+        Ok(Some(LuaSurface::new(surface)))
     }
 
-    fn render(_: &Lua, client: &mut Self, _: ()) -> LResult<()> {
-        let mut state = client.state.borrow_mut();
+    fn render(_: &Lua, client: &mut Self, _: ()) -> LResult<bool> {
+        let mut state = match client.state.try_borrow_mut().ok() {
+            Some(state) => state,
+            None => return Ok(false),
+        };
         state
             .handle_events(&mut client.event_queue)
             .into_lua_err()?;
         std::thread::sleep(std::time::Duration::from_millis(16));
 
-        Ok(())
+        Ok(true)
     }
 }
 
 impl UserData for WaylandClient {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("is_alive", WaylandClient::is_alive);
-        methods.add_method_mut("create_surface", WaylandClient::create_surface);
-        methods.add_method_mut("render", WaylandClient::render);
+        methods.add_method("is_busy", WaylandClient::is_busy);
+        methods.add_method_mut("try_create_surface", WaylandClient::create_surface);
+        methods.add_method_mut("try_render", WaylandClient::render);
     }
 }
 

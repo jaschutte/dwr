@@ -6,9 +6,12 @@ local client = example.create_client()
 local surfaces = {}
 local amount = 1
 for i = 1, amount do
-    client:create_surface(50, 50, function(surface)
-        surfaces[i] = surface
-    end)
+    if client:is_busy() then
+        print("can not create surface: ", i)
+    end
+    surfaces[i] = client:try_create_surface(50, 50)
+    surfaces[i]:demo_render()
+    print(surfaces[i])
 end
 
 local fps = 60
@@ -46,5 +49,5 @@ while client:is_alive() do
             -- print("demoing")
         end
     end
-    client:render()
+    print(client:try_render())
 end

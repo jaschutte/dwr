@@ -1,4 +1,5 @@
 use std::num::NonZero;
+use std::rc::*;
 
 use glcore::{GL_1_0_g, GLCore, GLCoreError};
 use memfd::Shm;
@@ -11,14 +12,17 @@ use wayland_client::{
     },
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
-    zwlr_layer_shell_v1::Layer,
-    
-    zwlr_layer_surface_v1::{self, Anchor, KeyboardInteractivity, ZwlrLayerSurfaceV1},
+    zwlr_layer_shell_v1,
+    zwlr_layer_surface_v1::{self, ZwlrLayerSurfaceV1},
 };
 
 use crate::{gpu_surface::GpuInterface, state::WaylandState};
 
 const BUFFER_NAMESPACE: &str = "DWR_BUF";
+
+pub type Anchor = zwlr_layer_surface_v1::Anchor;
+pub type Layer = zwlr_layer_shell_v1::Layer;
+pub type KeyboardInteractivity = zwlr_layer_surface_v1::KeyboardInteractivity;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Margins {
@@ -202,8 +206,57 @@ pub struct Surface {
     interfaces: SurfaceInterfaces,
 }
 
+pub type SurfaceId = ObjectId;
+pub type SurfaceReference = Weak<Surface>;
+
 impl Surface {
-    pub fn create(properties: SurfaceProperties, state: &mut WaylandState, queue_handle: &QueueHandle<WaylandState>) -> Option<Surface> {
+    pub fn get_id(&self) -> SurfaceId {
+        self.interfaces.layer_surface.id()
+    }
+
+    pub fn render(
+        &mut self,
+        render: fn(glcore::GLCore) -> Result<(), glcore::GLCoreError>,
+    ) -> Result<(), ()> {
+        render(self.interfaces.gpu_interface.get_renderer());
+        self.interfaces.gpu_interface
+            .swap_buffers();
+        Ok(())
+            //.map_err(glcore::GLCoreError::UnknownError((9999, "-")))
+    }
+
+    pub fn set_margin(&mut self, margins: Margins) -> Result<(), ()> {
+        self.interfaces.layer_surface
+            .set_margin(margins.top, margins.right, margins.bottom, margins.left);
+        self.properties.margins = margins;
+        self.interfaces.wayland_surface.commit();
+        Ok(())
+    }
+
+    pub fn set_size(&mut self, sizes: Sizes) {
+        println!("Setting size!");
+        self.interfaces.layer_surface
+            .set_size(sizes.width.get(), sizes.height.get());
+        self.interfaces.gpu_interface.resize(sizes.width, sizes.height);
+        self.properties.sizes = sizes;
+        self.interfaces.wayland_surface.commit();
+    }
+
+    pub fn set_layer(&mut self, layer: Layer) {
+        self.interfaces.layer_surface
+            .set_layer(layer);
+        self.properties.layer = layer;
+        self.interfaces.wayland_surface.commit();
+    }
+
+    pub fn set_anchor(&mut self, anchor: Anchor) {
+        self.interfaces.layer_surface
+            .set_anchor(anchor);
+        self.properties.anchor = anchor;
+        self.interfaces.wayland_surface.commit();
+    }
+
+    pub fn create(properties: SurfaceProperties, state: &WaylandState, queue_handle: &QueueHandle<WaylandState>) -> Option<Surface> {
         let protocols = state.bound.as_ref()?;
 
         let wayland_surface = protocols.get_compositor().create_surface(queue_handle, ());
@@ -215,7 +268,6 @@ impl Surface {
             queue_handle,
             (),
         );
-        let layer_id = layer_surface.id().clone();
 
         let gpu_interface = GpuInterface::new(&state.gl, &wayland_surface, properties.sizes.width, properties.sizes.height).ok()?;
 

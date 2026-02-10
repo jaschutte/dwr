@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use wayland_client::{
     self, Connection, Dispatch, DispatchError, EventQueue,
@@ -20,7 +21,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::{
 
 use crate::{
     gpu_surface::GlAbstraction,
-    surface::{Surface, UninitSurface},
+    surface::{Surface, SurfaceId},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -68,9 +69,9 @@ impl BoundProtocols {
 pub struct WaylandState {
     pub unbound: UnboundProtocols,
     pub bound: Option<BoundProtocols>,
-    pub surface_creators: HashMap<ObjectId, UninitSurface>,
-    pub surface_links: HashMap<ObjectId, Surface>,
-    pub surface_creation_callback: HashMap<ObjectId, Box<dyn FnOnce(&mut Self, ObjectId)>>,
+    // pub surface_creators: HashMap<ObjectId, UninitSurface>,
+    // pub surface_links: HashMap<ObjectId, Surface>,
+    // pub surface_creation_callback: HashMap<ObjectId, Box<dyn FnOnce(&mut Self, ObjectId)>>,
     pub gl: GlAbstraction,
 }
 
@@ -79,9 +80,6 @@ impl WaylandState {
         WaylandState {
             unbound: UnboundProtocols::default(),
             bound: None,
-            surface_creators: HashMap::new(),
-            surface_links: HashMap::new(),
-            surface_creation_callback: HashMap::new(),
             gl: GlAbstraction::new(display).expect("Unable to abstract GL"),
         }
     }
@@ -90,18 +88,19 @@ impl WaylandState {
         &mut self,
         event_queue: &mut EventQueue<Self>,
     ) -> Result<(), DispatchError> {
-        let ready: Vec<(ObjectId, UninitSurface)> = self
-            .surface_creators
-            .extract_if(|_, uninit| uninit.is_ready())
-            .collect();
-        for (key, uninit) in ready {
-            uninit.finalize(self);
-
-            println!("finalized {key:?}");
-            if let Some(callback) = self.surface_creation_callback.remove(&key) {
-                callback(self, key)
-            }
-        }
+        // todo!();
+        // let ready: Vec<(ObjectId, UninitSurface)> = self
+        //     .surface_creators
+        //     .extract_if(|_, uninit| uninit.is_ready())
+        //     .collect();
+        // for (key, uninit) in ready {
+        //     uninit.finalize(self);
+        //
+        //     println!("finalized {key:?}");
+        //     if let Some(callback) = self.surface_creation_callback.remove(&key) {
+        //         callback(self, key)
+        //     }
+        // }
 
         Ok(())
     }
@@ -122,42 +121,6 @@ impl WaylandState {
         event_queue.blocking_dispatch(self)?;
 
         self.post_dispatch(event_queue)
-    }
-
-    /// Start the creation of a surface (`ZwlrLayerShellV1`)
-    ///
-    /// Due to the nature of Wayland, the creation is not immediate and requires a roundtrip with
-    /// the wayland server. The `ObjectId` returned by this function can be used to check if the
-    /// surface creation has been finalized.
-    pub fn create_surface_async(
-        &mut self,
-        width: u32,
-        height: u32,
-        layer: Layer,
-        event_queue: &mut EventQueue<Self>,
-    ) -> Option<ObjectId> {
-        let queue_handle = event_queue.handle();
-        UninitSurface::setup(width, height, layer, self, &queue_handle)
-    }
-
-    /// Start the creation of a surface (`ZwlrLayerShellV1`) and wait for its completion
-    ///
-    /// # Warning
-    /// This function is VERY prone to deadlocks, only use it for quick debugging purposes
-    pub fn create_surface_blocking(
-        &mut self,
-        width: u32,
-        height: u32,
-        layer: Layer,
-        event_queue: &mut EventQueue<Self>,
-    ) -> Option<ObjectId> {
-        let queue_handle = event_queue.handle();
-        let id = UninitSurface::setup(width, height, layer, self, &queue_handle)?;
-
-        while !self.surface_links.contains_key(&id) {
-            self.handle_events(event_queue).ok()?;
-        }
-        Some(id)
     }
 }
 
