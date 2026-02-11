@@ -3,10 +3,10 @@
 OUT=target/debug/libdwr.so
 
 run: $(OUT)
-	nixGL luajit examples/main.lua
+	luajit examples/main.lua
 
 rust:
-	nixGL cargo run
+	cargo run
 
 build: $(OUT)
 

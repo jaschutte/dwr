@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use wayland_client::{
@@ -69,6 +69,7 @@ impl BoundProtocols {
 pub struct WaylandState {
     pub unbound: UnboundProtocols,
     pub bound: Option<BoundProtocols>,
+    pub pending_surfaces: HashSet<usize>,
     // pub surface_creators: HashMap<ObjectId, UninitSurface>,
     // pub surface_links: HashMap<ObjectId, Surface>,
     // pub surface_creation_callback: HashMap<ObjectId, Box<dyn FnOnce(&mut Self, ObjectId)>>,
@@ -79,6 +80,7 @@ impl WaylandState {
     pub fn new(display: &WlDisplay) -> WaylandState {
         WaylandState {
             unbound: UnboundProtocols::default(),
+            pending_surfaces: HashSet::new(),
             bound: None,
             gl: GlAbstraction::new(display).expect("Unable to abstract GL"),
         }

@@ -12,7 +12,7 @@ use wayland_client::{
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 
 use super::rendering::LuaSurface;
-use crate::{opengl::types::GlResult, state::WaylandState, surface::{Margins, Surface, SurfaceProperties}};
+use crate::{opengl::types::GlResult, state::WaylandState, surface::{Margins, Sizes, Surface, SurfaceProperties}};
 
 pub struct WaylandClient {
     connection: Connection,
@@ -21,6 +21,11 @@ pub struct WaylandClient {
     queue_handle: QueueHandle<WaylandState>,
     state: Rc<RefCell<WaylandState>>,
 }
+
+#[derive(Debug, Clone)]
+struct LuaFunctionWrapper(Function);
+unsafe impl Sync for LuaFunctionWrapper {}
+unsafe impl Send for LuaFunctionWrapper {}
 
 impl WaylandClient {
     fn init(_: &Lua, _: ()) -> LResult<WaylandClient> {
@@ -95,25 +100,35 @@ impl WaylandClient {
     }
 
     fn is_busy(_: &Lua, client: &Self, _: ()) -> LResult<bool> {
-        Ok(client.state.try_borrow().is_err())
+        Ok(client.state.try_borrow_mut().is_err())
     }
 
     fn create_surface(
         _: &Lua,
         client: &mut Self,
-        _: (),
+        (size, callback): (Sizes, Function),
     ) -> LResult<Option<LuaSurface>> {
-        let state = match client.state.try_borrow().ok() {
+        let mut state = match client.state.try_borrow_mut().ok() {
             Some(state) => state,
             None => return Ok(None),
         };
-        let properties = SurfaceProperties::default();
-        let surface = match Surface::create(properties, &state, &client.queue_handle) {
-            Some(state) => state,
-            None => return Ok(None),
+        let properties = SurfaceProperties {
+            size,
+            ..Default::default()
         };
+        Surface::create(properties, &mut state, &client.queue_handle, |surface, callback| {
+            let lua_surface =  LuaSurface::new(surface);
+            callback.0.call::<()>(lua_surface);
+        }, LuaFunctionWrapper(callback));
 
-        Ok(Some(LuaSurface::new(surface)))
+        Ok(None)
+
+        // let surface = match Surface::create(properties, &state, &client.queue_handle) {
+        //     Some(state) => state,
+        //     None => return Ok(None),
+        // };
+
+        // Ok(Some(LuaSurface::new(surface)))
     }
 
     fn render(_: &Lua, client: &mut Self, _: ()) -> LResult<bool> {

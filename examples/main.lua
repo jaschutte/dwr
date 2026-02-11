@@ -9,10 +9,18 @@ for i = 1, amount do
     if client:is_busy() then
         print("can not create surface: ", i)
     end
-    surfaces[i] = client:try_create_surface(50, 50)
-    surfaces[i]:demo_render()
-    print(surfaces[i])
+    surfaces[i] = client:try_create_surface({ width = 50, height = 50 }, function(surface)
+        -- print(surface)
+        surfaces[i] = surface
+        surface:demo_render()
+    end)
+    -- surfaces[i]:demo_render()
+    -- print(surfaces[i])
 end
+
+-- while client:is_alive() do
+--     client:try_render()
+-- end
 
 local fps = 60
 local speed = 100
@@ -35,7 +43,7 @@ while client:is_alive() do
         if surface then
             if top >= 300 then
                 surface:set_size({ height = 10 + top - 300, width = 100 })
-                client:render()
+                -- client:try_render()
                 surface:demo_render()
                 resized = true
             end
@@ -49,5 +57,5 @@ while client:is_alive() do
             -- print("demoing")
         end
     end
-    print(client:try_render())
+    client:try_render()
 end
