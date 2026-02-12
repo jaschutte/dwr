@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [lib]
-path = "src/main.rs"
 crate-type = [ "cdylib" ]
 
 [dependencies]
@@ -14,11 +13,10 @@ wayland-protocols = { version = "0.32.9", features = ["client", "unstable"] }
 wayland-protocols-wlr = { version = "0.3.9", features = ["client"] }
 wayland-egl = "0.32.8"
 
-memfd = { path = "memfd" }
-
 raw-window-handle = "0.6.2"
 glutin = { version = "0.32.3", features = ["wayland", "egl", "wayland-sys"], default-features = false }
 glcore-rs = { version = "0.3.3", features = ["diagnose"] }
 
 mlua = { version = "0.11.5", features = ["luajit", "module"] }
 fontdue = "0.9.3"
+shm-memfd = "0.1.0"

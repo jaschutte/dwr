@@ -42,20 +42,11 @@ while client:is_alive() do
         local surface = surfaces[i]
         if surface then
             if top >= 300 then
-                surface:set_size({ height = 10 + top - 300, width = 100 })
-                -- client:try_render()
+                surface:set_size({ width = 50 + top - 300, height = 50 })
                 surface:demo_render()
-                resized = true
             end
         end
     end
 
-    for i = 1, amount do
-        local surface = surfaces[i]
-        if surface then
-            -- surface:demo_render()
-            -- print("demoing")
-        end
-    end
     client:try_render()
 end
