@@ -1,5 +1,8 @@
 use std::{
-    cell::{Ref, RefCell}, num::NonZero, rc::{Rc, Weak}, sync::Arc
+    cell::{Ref, RefCell},
+    num::NonZero,
+    rc::{Rc, Weak},
+    sync::Arc,
 };
 
 use mlua::{
@@ -8,14 +11,14 @@ use mlua::{
 use wayland_backend::client::ObjectId;
 
 use crate::{
+    lua::entry::LuaAnchor,
     state::WaylandState,
-    surface::{Margins, Sizes, Surface},
+    surface::{Anchor, Margins, Sizes, Surface},
 };
 
 #[derive(Debug)]
 pub struct LuaSurface {
     surface: Surface,
-    // state: Rc<RefCell<WaylandState>>,
 }
 
 impl LuaSurface {
@@ -23,34 +26,39 @@ impl LuaSurface {
         LuaSurface { surface }
     }
 
+    /// Sets the margins of the [`LuaSurface`]
+    ///
+    /// Positions the `LuaSurface` relative to the anchor point, set by [`LuaSurface::set_anchor`]
+    ///
+    /// When the anchor point is set to `Anchor::Top | Anchor::Left`, this can essentially set the
+    /// window position relative to the screen
+    ///
+    /// For more information, look at the [Wayland protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_margin)
     fn set_margin(_: &Lua, reference: &mut Self, margins: Margins) -> LResult<()> {
-        // let mut state = reference.state.try_borrow_mut().into_lua_err()?;
-        // let surface = state
-        //     .surface_links
-        //     .get_mut(&reference.id)
-        //     .ok_or(LError::MemoryError(
-        //         "Surface reference invalid, this should never be possible".into(),
-        //     ))?;
-        // todo!();
         reference.surface.set_margin(margins);
+
+        Ok(())
+    }
+
+    /// Sets the anchor point of the [`LuaSurface`]
+    ///
+    /// The anchor is which edge(s) of the screen the window position (=margin) will be relative to
+    ///
+    /// Setting this to `Anchor::Top | Anchor::Left` will make surface be able to position itself
+    /// as if one were using screen coordinates
+    ///
+    /// For more information, look at the [Wayland protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#zwlr_layer_surface_v1:request:set_anchor)
+    fn set_anchor(_: &Lua, reference: &mut Self, anchor: LuaAnchor) -> LResult<()> {
+        reference.surface.set_anchor(anchor.into());
         Ok(())
     }
 
     fn set_size(_: &Lua, reference: &mut Self, sizes: Sizes) -> LResult<()> {
-        // let mut state = reference.state.try_borrow_mut().into_lua_err()?;
-        // let surface = state
-        //     .surface_links
-        //     .get_mut(&reference.id)
-        //     .ok_or(LError::MemoryError(
-        //         "Surface reference invalid, this should never be possible".into(),
-        //     ))?;
         reference.surface.set_size(sizes);
         Ok(())
     }
 
     fn demo_render(_: &Lua, reference: &mut Self, _: ()) -> LResult<()> {
-        // let mut state = reference.state.try_borrow_mut().into_lua_err()?;
-        // super::entry::WaylandClient::render_test(&mut state, &reference.id);
         super::entry::WaylandClient::render_test(&mut reference.surface);
         Ok(())
     }
@@ -59,16 +67,11 @@ impl LuaSurface {
 impl UserData for LuaSurface {
     fn add_methods<M: mlua::UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method_mut("set_margin", LuaSurface::set_margin);
+        methods.add_method_mut("set_anchor", LuaSurface::set_anchor);
         methods.add_method_mut("set_size", LuaSurface::set_size);
         methods.add_method_mut("demo_render", LuaSurface::demo_render);
     }
 }
-
-// impl FromLuaMulti for LuaSurfaceReference {
-//     fn from_lua_multi(values: mlua::MultiValue, lua: &mlua::Lua) -> mlua::Result<Self> {
-//         todo!()
-//     }
-// }
 
 impl FromLua for Margins {
     fn from_lua(value: mlua::Value, _lua: &mlua::Lua) -> mlua::Result<Self> {
@@ -107,12 +110,11 @@ impl FromLua for Sizes {
 
         let width32: u32 = table.get("width").map_err(missing_entry("width"))?;
         let height32: u32 = table.get("height").map_err(missing_entry("height"))?;
-        let width = NonZero::try_from(width32).map_err(|_| LError::RuntimeError(format!("Width may not be zero")))?;
-        let height = NonZero::try_from(height32).map_err(|_| LError::RuntimeError(format!("Width may not be zero")))?;
+        let width = NonZero::try_from(width32)
+            .map_err(|_| LError::RuntimeError(format!("Width may not be zero")))?;
+        let height = NonZero::try_from(height32)
+            .map_err(|_| LError::RuntimeError(format!("Width may not be zero")))?;
 
-        Ok(Sizes {
-            width: width,
-            height: height,
-        })
+        Ok(Sizes { width, height })
     }
 }

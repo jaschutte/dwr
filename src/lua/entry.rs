@@ -1,10 +1,10 @@
-use std::{cell::RefCell, rc::Rc};
-
 use glcore::GLCoreError;
 use mlua::{
-    Error as LError, ExternalResult, Function, IntoLua, Lua, Result as LResult, Table, UserData,
-    UserDataMethods,
+    Error as LError, ExternalResult, FromLua, Function, IntoLua, Lua, Result as LResult, Table,
+    UserData, UserDataMethods, UserDataRef,
+    Value::{self, Nil},
 };
+use std::{cell::RefCell, rc::Rc};
 use wayland_backend::client::ObjectId;
 use wayland_client::{
     Connection, DispatchError, EventQueue, Proxy, QueueHandle, protocol::wl_display::WlDisplay,
@@ -12,7 +12,11 @@ use wayland_client::{
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::Layer;
 
 use super::rendering::LuaSurface;
-use crate::{opengl::types::GlResult, state::WaylandState, surface::{Margins, Sizes, Surface, SurfaceProperties}};
+use crate::{
+    opengl::types::GlResult,
+    state::WaylandState,
+    surface::{Anchor, Margins, Sizes, Surface, SurfaceProperties},
+};
 
 pub struct WaylandClient {
     connection: Connection,
@@ -116,10 +120,16 @@ impl WaylandClient {
             size,
             ..Default::default()
         };
-        Surface::create(properties, &mut state, &client.queue_handle, |surface, callback| {
-            let lua_surface =  LuaSurface::new(surface);
-            callback.0.call::<()>(lua_surface);
-        }, LuaFunctionWrapper(callback));
+        Surface::create(
+            properties,
+            &mut state,
+            &client.queue_handle,
+            |surface, callback| {
+                let lua_surface = LuaSurface::new(surface);
+                callback.0.call::<()>(lua_surface);
+            },
+            LuaFunctionWrapper(callback),
+        );
 
         Ok(true)
     }
@@ -147,9 +157,53 @@ impl UserData for WaylandClient {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct LuaAnchor(Anchor);
+
+impl LuaAnchor {
+    fn add(_: &Lua, lhs: &LuaAnchor, rhs: LuaAnchor) -> LResult<LuaAnchor> {
+        Ok(LuaAnchor(lhs.0 | rhs.0))
+    }
+}
+
+impl FromLua for LuaAnchor {
+    fn from_lua(value: Value, _lua: &Lua) -> LResult<Self> {
+        Ok(*value
+            .as_userdata()
+            .ok_or(LError::UserDataTypeMismatch)?
+            .borrow()?)
+    }
+}
+
+impl From<LuaAnchor> for Anchor {
+    fn from(value: LuaAnchor) -> Self {
+        value.0
+    }
+}
+
+impl UserData for LuaAnchor {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method("__add", LuaAnchor::add);
+    }
+}
+
+struct LuaAnchorCreator;
+impl UserData for LuaAnchorCreator {
+    fn add_fields<F: mlua::UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field("LEFT", LuaAnchor(Anchor::Left));
+        fields.add_field("RIGHT", LuaAnchor(Anchor::Right));
+        fields.add_field("TOP", LuaAnchor(Anchor::Top));
+        fields.add_field("BOTTOM", LuaAnchor(Anchor::Bottom));
+    }
+}
+
 #[mlua::lua_module]
-fn dwr(lua: &Lua) -> LResult<Table> {
-    let exports = lua.create_table()?;
-    exports.set("create_client", lua.create_function(WaylandClient::init)?)?;
-    Ok(exports)
+fn dwr(lua: &Lua) -> LResult<mlua::Value> {
+    let client_creator = lua.create_table()?;
+    client_creator.set("create_client", lua.create_function(WaylandClient::init)?)?;
+    lua.globals().set("WaylandClient", client_creator)?;
+
+    lua.globals().set("Anchor", LuaAnchorCreator)?;
+    Ok(mlua::Value::Nil)
 }

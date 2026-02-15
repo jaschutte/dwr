@@ -1,7 +1,7 @@
 package.cpath = package.cpath .. ";./target/debug/lib?.so"
+require("dwr")
 
-local example = require("dwr")
-local client = example.create_client()
+local client = WaylandClient.create_client()
 
 local surfaces = {}
 local amount = 1
@@ -9,7 +9,7 @@ for i = 1, amount do
     if client:is_busy() then
         print("can not create surface: ", i)
     end
-    surfaces[i] = client:try_create_surface({ width = 50, height = 50 }, function(surface)
+    client:try_create_surface({ width = 50, height = 50 }, function(surface)
         -- print(surface)
         surfaces[i] = surface
         surface:demo_render()
@@ -32,7 +32,7 @@ while client:is_alive() do
     for i = 1, amount do
         local surface = surfaces[i]
         if surface then
-            surface:set_margin({ top = top + i * 60, bottom = 0, left = 0, right = 0 })
+            surface:set_margin({ top = top + i * 60, bottom = 0, left = 300, right = 0 })
         end
     end
     top = top + speed / fps
@@ -44,6 +44,9 @@ while client:is_alive() do
             if top >= 300 then
                 surface:set_size({ width = 50 + top - 300, height = 50 })
                 surface:demo_render()
+            end
+            if top >= 400 then
+                surface:set_anchor(Anchor.LEFT + Anchor.TOP)
             end
         end
     end
