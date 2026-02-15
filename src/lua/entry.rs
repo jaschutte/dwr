@@ -107,10 +107,10 @@ impl WaylandClient {
         _: &Lua,
         client: &mut Self,
         (size, callback): (Sizes, Function),
-    ) -> LResult<Option<LuaSurface>> {
+    ) -> LResult<bool> {
         let mut state = match client.state.try_borrow_mut().ok() {
             Some(state) => state,
-            None => return Ok(None),
+            None => return Ok(false),
         };
         let properties = SurfaceProperties {
             size,
@@ -121,14 +121,7 @@ impl WaylandClient {
             callback.0.call::<()>(lua_surface);
         }, LuaFunctionWrapper(callback));
 
-        Ok(None)
-
-        // let surface = match Surface::create(properties, &state, &client.queue_handle) {
-        //     Some(state) => state,
-        //     None => return Ok(None),
-        // };
-
-        // Ok(Some(LuaSurface::new(surface)))
+        Ok(true)
     }
 
     fn render(_: &Lua, client: &mut Self, _: ()) -> LResult<bool> {

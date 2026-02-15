@@ -16,6 +16,7 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 
 use crate::{gpu_surface::GpuInterface, state::WaylandState};
+use crate::error::Error;
 
 const BUFFER_NAMESPACE: &str = "DWR_BUF";
 
@@ -105,12 +106,11 @@ impl Surface {
 
     pub fn render(
         &mut self,
-        render: fn(glcore::GLCore) -> Result<(), glcore::GLCoreError>,
-    ) -> Result<(), glcore::GLCoreError> {
-        render(self.interfaces.gpu_interface.get_renderer())?;
+        render: fn(glcore::GLCore) -> Result<(), GLCoreError>,
+    ) -> Result<(), Error> {
+        render(self.interfaces.gpu_interface.get_renderer()).map_err(|err| Error::from(err))?;
         self.interfaces.gpu_interface.swap_buffers()?;
         Ok(())
-        //.map_err(glcore::GLCoreError::UnknownError((9999, "-")))
     }
 
     pub fn set_margin(&mut self, margins: Margins) {

@@ -20,6 +20,8 @@ use wayland_client::Proxy;
 use wayland_client::protocol::wl_display::WlDisplay;
 use wayland_client::protocol::wl_surface::WlSurface;
 
+use crate::error::Error;
+
 #[derive(Debug, Clone)]
 pub struct GlAbstraction {
     display: Display,
@@ -143,8 +145,8 @@ impl GpuInterface {
         self.renderer.glViewport(0, 0, w as i32, h as i32);
     }
 
-    pub fn swap_buffers(&mut self) -> Result<(), GlutError> {
-        self.surface.swap_buffers(&self.context)
+    pub fn swap_buffers(&mut self) -> Result<(), Error> {
+        self.surface.swap_buffers(&self.context).map_err(|err| Error::from(err))
     }
 
     pub fn get_renderer(&self) -> GLCore {
